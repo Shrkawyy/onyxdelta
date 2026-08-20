@@ -31,6 +31,7 @@
   var passiveRows = [];
   var passivePaintTimer = null;
   var ffaPlayBridgeInstalled = false;
+  var primaryReconnectTimer = null;
   var origInit = null;
   var origSend = null;
   var origOnMessage = null;
@@ -108,10 +109,37 @@
     return isNewFfaHost(selectedRaw());
   }
 
+  function ffaQuery() {
+    var origin = (global.location && global.location.host) || 'onyxdelta.vercel.app';
+    return '?po=' + encodeURIComponent(origin) + '&tid=' + hex32();
+  }
+
   function wsUrl(host) {
     host = mapHost(host);
-    if (isNewFfaHost(host)) return 'wss://' + NEW_FFA_HOST;
-    return 'wss://' + NEW_FFA_HOST;
+    return 'wss://' + NEW_FFA_HOST + ffaQuery();
+  }
+
+  function installWebSocketUrlPatch() {
+    var Native = global.WebSocket;
+    if (!Native || Native.__onyxUrlPatch) return;
+    function OnyxWebSocket(url, protocols) {
+      var target = String(url || '');
+      if (/^wss:\/\/eu\.senpa\.io:2001\/?$/i.test(target)) {
+        target = 'wss://' + NEW_FFA_HOST + ffaQuery();
+        log('CONNECT', 'rewrote bare Delta WebSocket URL → ' + target.replace(/(tid=)[a-f0-9]+/i, '$1***'));
+      }
+      if (arguments.length > 1) return new Native(target, protocols);
+      return new Native(target);
+    }
+    try {
+      OnyxWebSocket.prototype = Native.prototype;
+      Object.setPrototypeOf(OnyxWebSocket, Native);
+      Object.defineProperty(OnyxWebSocket, '__onyxUrlPatch', { value: true });
+      global.WebSocket = OnyxWebSocket;
+      log('CONNECT', 'WebSocket URL patch installed for Delta SC path');
+    } catch (err) {
+      log('CONNECT', 'WebSocket URL patch skipped — ' + (err && err.message || err));
+    }
   }
 
   function readJwt(tab) {
@@ -425,10 +453,15 @@
     secondaryAuthOverlay = null;
   }
 
+  function primarySocketReady(sc) {
+    if (!sc || !sc.Tab1) return false;
+    return sc.connectedTab1 === true || sc.Tab1.readyState === 1;
+  }
+
   function startSecondary(sc) {
     if (secondaryStarted || secondaryPending) return;
-    if (!sc || !sc.Tab1) {
-      log('CONNECT', 'Tab pressed before Tab 1 is ready; keeping Secondary closed');
+    if (!primarySocketReady(sc)) {
+      log('CONNECT', 'Tab pressed before Tab 1 WebSocket OPEN; keeping Secondary closed');
       return;
     }
     log('AUTH', 'Delta guest mode — secondary login skipped');
@@ -495,7 +528,7 @@
     document.addEventListener('keydown', function (event) {
       if (event.key !== 'Tab' || event.ctrlKey || event.altKey || event.metaKey) return;
       if (secondaryStarted || secondaryPending) return;
-      if (!sc || !sc.Tab1 || sc.Tab2) return;
+      if (!sc || !primarySocketReady(sc) || sc.Tab2) return;
       event.preventDefault();
       event.stopImmediatePropagation();
       startSecondary(sc);
@@ -529,6 +562,19 @@
         }
       }, 1200);
     }, 0);
+  }
+
+  function schedulePrimaryReconnect(sc) {
+    if (primaryReconnectTimer || !isNewFfaSelected()) return;
+    var active = global.ONYXFfa && typeof global.ONYXFfa.isPlaying === 'function' && global.ONYXFfa.isPlaying();
+    if (!active) return;
+    primaryReconnectTimer = setTimeout(function () {
+      primaryReconnectTimer = null;
+      if (isNewFfaSelected() && !primarySocketReady(sc)) {
+        log('CONNECT', 'Tab 1 closed during FFA play — reconnecting automatically');
+        autoStartPrimaryTab(sc);
+      }
+    }, 1500);
   }
 
   function installFfaPlayBridge(sc) {
@@ -647,7 +693,7 @@
     if (origOnClose) {
       sc.onClose = function (tab) {
         log('DISCONNECT', 'tab=' + (tab || 1));
-        if ((tab || 1) === 1) sc.__onyxPrimaryTabAttempts = 0;
+        if ((tab || 1) === 1) { sc.__onyxPrimaryTabAttempts = 0; schedulePrimaryReconnect(sc); }
         if ((tab || 1) === 2) { secondaryStarted = false; secondaryPending = false; }
         spectateSent = false;
         return origOnClose(tab);
@@ -657,6 +703,7 @@
     if (origOnError) {
       sc.onError = function (tab) {
         log('DISCONNECT', 'error tab=' + (tab || 1));
+        if ((tab || 1) === 1) schedulePrimaryReconnect(sc);
         return origOnError(tab);
       };
     }
@@ -717,6 +764,7 @@
   }
 
   function boot() {
+    installWebSocketUrlPatch();
     installWasmLocate();
     seedExtrasServer();
     seedChatType();
