@@ -347,9 +347,9 @@
     return /^[\w-]+\.[\w-]+\.[\w-]+$/.test(String(token || ''));
   }
 
-  // deo still creates its legacy JWT opcode=13 packet. Delta FFAEU2 accepts
-  // the same opcode only with the UTF-16 string "null"; replacing the packet
-  // here keeps both SC tabs authenticated in guest mode.
+  // deo creates its legacy opcode=13 auth packet. Delta accepts the UTF-16
+  // auth format; when a valid session JWT exists, preserve it. If there is
+  // no usable session, fall back to the guest "null" handshake.
   function makeGuestAuthPacket() {
     var text = 'null';
     var out = new Uint8Array(3 + text.length * 2);
@@ -533,12 +533,15 @@
               authText += String.fromCharCode(u8[3 + ai * 2] | (u8[4 + ai * 2] << 8));
             }
           } catch (_) {}
-          if (authText === 'null') {
-            log('AUTH', 'opcode=13 guest null handshake allowed');
-          } else {
+          var jwt = readJwt(tab || 1);
+          if (isJwtLike(jwt)) {
+            sendBuf = buildAuthPacket(jwt);
+            u8 = new Uint8Array(sendBuf);
+            log('AUTH', 'opcode=13 using JWT tab=' + (tab || 1));
+          } else if (authText === 'null' || !isJwtLike(jwt)) {
             sendBuf = makeGuestAuthPacket();
             u8 = sendBuf;
-            log('AUTH', 'opcode=13 JWT replaced with guest null tab=' + (tab || 1));
+            log('AUTH', 'opcode=13 using guest null tab=' + (tab || 1));
           }
         }
         if (shouldLogPacket(u8, 'out')) log('PACKET-OUT', describePacket(u8, 'out') + ' tab=' + (tab || 1));
