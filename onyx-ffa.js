@@ -148,6 +148,28 @@
     return sel ? sel.value : '';
   }
 
+  function ensureDeltaSelected() {
+    var sel = document.getElementById('servers');
+    if (!sel || !sel.options || !sel.options.length) return false;
+    var current = selectedOption();
+    if (current && (current.getAttribute('data-onyx-type') === FFA_TYPE || isFfaValue(sel.value))) return true;
+    var candidate = null;
+    for (var i = 0; i < sel.options.length; i++) {
+      var opt = sel.options[i];
+      var marker = [opt.getAttribute('data-onyx-type') || '', opt.getAttribute('data-onyx-host') || '', opt.getAttribute('data-onyx-id') || '', opt.textContent || ''].join(' ').toLowerCase();
+      if (marker.indexOf('eu.senpa.io:2001') !== -1 || marker.indexOf('delta-ffaeu2') !== -1 || marker.indexOf('delta ffaeu2') !== -1) {
+        candidate = opt;
+        break;
+      }
+    }
+    if (!candidate) return false;
+    if (candidate.getAttribute('data-onyx-host')) candidate.value = candidate.getAttribute('data-onyx-host');
+    sel.selectedIndex = candidate.index;
+    try { sel.dispatchEvent(new Event('change', { bubbles: true })); } catch (_) {}
+    log('CONNECT', 'auto-selected Delta FFAEU2 option host=' + sel.value);
+    return true;
+  }
+
   function isUserscriptRuntime() {
     return !!(global.__KATERONYX_USERSCRIPT__ || /(?:^|\.)senpa\.io$/.test(location.hostname));
   }
@@ -1606,6 +1628,12 @@
 
   function interceptUi() {
     restoreProfileFields();
+    ensureDeltaSelected();
+    var selectAttempts = 0;
+    var selectTimer = setInterval(function () {
+      selectAttempts++;
+      if (ensureDeltaSelected() || selectAttempts > 20) clearInterval(selectTimer);
+    }, 150);
     document.addEventListener('click', function (e) {
       var playBtn = e.target && e.target.closest && e.target.closest('#button-play');
       if (!playBtn || !isFfaSelected()) return;
