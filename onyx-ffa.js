@@ -1207,15 +1207,37 @@
     return (cell.skin || (rec && rec.skin) || '').trim();
   }
 
+  function normalizeSkinUrl(value) {
+    var raw = String(value || '').trim();
+    if (!raw) return '';
+    if (/^https?:\/\//i.test(raw)) return raw;
+    // Delta commonly sends/stores the Imgur skin ID rather than the full URL.
+    // Convert the ID to the same CDN URL used by the native client.
+    if (/^[A-Za-z0-9]{5,20}$/.test(raw)) return 'https://i.imgur.com/' + raw + '.png';
+    return '';
+  }
+
   function getSkinImage(url) {
-    if (!url || url.indexOf('http') !== 0) return null;
-    var rec = skinCache[url];
+    var normalized = normalizeSkinUrl(url);
+    if (!normalized) return null;
+    var rec = skinCache[normalized];
     if (rec) return rec.ok ? rec.img : null;
-    rec = skinCache[url] = { img: new Image(), ok: false, loading: true };
-    rec.img.crossOrigin = 'anonymous';
-    rec.img.onload = function () { rec.ok = true; rec.loading = false; };
-    rec.img.onerror = function () { rec.ok = false; rec.loading = false; };
-    rec.img.src = url;
+
+    var img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.decoding = 'async';
+    rec = skinCache[normalized] = { img: img, ok: false, loading: true };
+    img.onload = function () {
+      rec.ok = true;
+      rec.loading = false;
+    };
+    img.onerror = function () {
+      rec.ok = false;
+      rec.loading = false;
+      // Allow a later packet/retry to try the URL again.
+      delete skinCache[normalized];
+    };
+    img.src = normalized;
     return null;
   }
 

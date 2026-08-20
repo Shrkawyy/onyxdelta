@@ -330,13 +330,17 @@
     connect(server, nicks, skins) {
       this.disconnect();
       const target = server || CONFIG.defaultServer;   // Delta FFAEU2: eu.senpa.io:2001
-      const relay = CONFIG.relayUrl;                    // wss://chatonyx.onrender.com/chat
+      // FFAEU2 should connect directly to the game WebSocket.
+      // The previous build constructed MultiboxClient with an empty relay URL,
+      // which could add a relay hop (or create an invalid WebSocket URL).
+      const directWs = (CONFIG.servers.find(s => s.host === target) || {}).wsUrl
+        || ('wss://' + target);
       const n = CONFIG.multibox.connections;
       // ruaj edhe te window.__connNicks për pajtueshmëri me modelin ONYX
       global.__connNicks = nicks.slice(0, n);
       for (let i = 0; i < n; i++) {
-        const c = new MultiboxClient(i, relay, this.bus);
-        c.targetServer = target;                        // relay-i e çon te ky server
+        const c = new MultiboxClient(i, directWs, this.bus);
+        c.targetServer = target;
         c.connect(nicks[i] || (nicks[0] ? nicks[0] + '-' + (i + 1) : 'player'), skins[i] || '');
         this.clients.push(c);
       }
