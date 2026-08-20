@@ -484,13 +484,9 @@
           if (shouldLogPacket(u8, 'in')) log('PACKET-IN', describePacket(u8, 'in') + ' tab=' + (tab || 1));
           if (u8[0] === 0) {
             log('HANDSHAKE', describePacket(u8, 'in'));
-            log('GAME-STATE', 'serverInfo received — deo worldUpdate/PIXI path');
-            if (!spectateSent) {
-              spectateSent = true;
-              try { sendDeoSpectate(sc); } catch (err) {
-                log('INPUT', 'spectate-ready skip ' + (err && err.message || err));
-              }
-            }
+            log('GAME-STATE', 'serverInfo received — isolated FFA input path active');
+            // Do not inject deo's legacy spectate-ready opcode 20 here.
+            // ONYXFfa sends the correct play/spectate cursor after the user's action.
           }
           if (u8[0] === 8) log('AUTH', 'server opcode=8 → deo auth()');
           if (u8[0] === 7) log('HANDSHAKE', 'server captcha opcode=7 — deo sends opcode 14');
