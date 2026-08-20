@@ -1025,7 +1025,7 @@
         setPhase('INITIALIZED');
         sendPlayerInfo();
         spectateEnabled = !!wantSpectate;
-        if (playRequested && !wantSpectate) maybeSpawn();
+        if (playing && !wantSpectate && !spawned) { playRequested = true; maybeSpawn(); }
         if (pingTimer) clearInterval(pingTimer);
         pingTimer = setInterval(sendPing, 1000);
         if (cursorTimer) clearInterval(cursorTimer);
@@ -1066,7 +1066,7 @@
           log('World state received opcode=20');
           log('WORLD_READY');
           setPhase('WORLD_READY');
-          if (playRequested && !wantSpectate && !spawned) maybeSpawn();
+          if (playing && !wantSpectate && !spawned) { playRequested = true; maybeSpawn(); }
         }
         handleOpcode20(r);
         break;
