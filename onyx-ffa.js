@@ -28,7 +28,6 @@
   var workerReady = false;
   var socketOpen = false;
   var authCompleted = false;
-  var guestHandshakeSent = false;
   var clientReady = false;
   var worldSeen = false;
   var spawned = false;
@@ -63,7 +62,6 @@
   var fpsFrames = 0;
   var fpsLast = 0;
   var fpsValue = 0;
-  var lastLeaderboardAt = 0;
   var camX = 0;
   var camY = 0;
   var camZoom = 0.18;
@@ -150,36 +148,11 @@
     return sel ? sel.value : '';
   }
 
-  function ensureDeltaSelected() {
-    var sel = document.getElementById('servers');
-    if (!sel || !sel.options || !sel.options.length) return false;
-    var current = selectedOption();
-    if (current && (current.getAttribute('data-onyx-type') === FFA_TYPE || isFfaValue(sel.value))) return true;
-    var candidate = null;
-    for (var i = 0; i < sel.options.length; i++) {
-      var opt = sel.options[i];
-      var marker = [opt.getAttribute('data-onyx-type') || '', opt.getAttribute('data-onyx-host') || '', opt.getAttribute('data-onyx-id') || '', opt.textContent || ''].join(' ').toLowerCase();
-      if (marker.indexOf('eu.senpa.io:2001') !== -1 || marker.indexOf('delta-ffaeu2') !== -1 || marker.indexOf('delta ffaeu2') !== -1) {
-        candidate = opt;
-        break;
-      }
-    }
-    if (!candidate) return false;
-    if (candidate.getAttribute('data-onyx-host')) candidate.value = candidate.getAttribute('data-onyx-host');
-    sel.selectedIndex = candidate.index;
-    try { sel.dispatchEvent(new Event('change', { bubbles: true })); } catch (_) {}
-    log('CONNECT', 'auto-selected Delta FFAEU2 option host=' + sel.value);
-    return true;
-  }
-
   function isUserscriptRuntime() {
     return !!(global.__KATERONYX_USERSCRIPT__ || /(?:^|\.)senpa\.io$/.test(location.hostname));
   }
 
   function isFfaSelected() {
-    // The legacy UI can leave the only Delta option at selectedIndex=-1.
-    // Re-select it at the exact moment PLAY is tested, not only during boot.
-    if (!selectedOption()) ensureDeltaSelected();
     if (isUserscriptRuntime()) return true;
     var opt = selectedOption();
     if (opt && opt.getAttribute('data-onyx-type') === FFA_TYPE) return true;
@@ -460,9 +433,7 @@
 
   function buildFfaUrl() {
     var host = ffaHost();
-    var originHost = location.host;
-    if (/^(127\.0\.0\.1|localhost)(:\d+)?$/i.test(originHost)) originHost = 'onyxdelta-5768.vercel.app';
-    return 'wss://' + host + '?po=' + encodeURIComponent(originHost) + '&tid=' + tid();
+    return 'wss://' + host + '?po=' + encodeURIComponent(location.host) + '&tid=' + tid();
   }
 
   function hexBytes(bytes, max) {
@@ -489,8 +460,6 @@
   }
 
   function sendAuth() {
-    if (guestHandshakeSent) return;
-    guestHandshakeSent = true;
     lastPhase = 'HANDSHAKE';
     authCompleted = true;
     clientReady = true;
@@ -503,9 +472,6 @@
     logAuth('GUEST');
     log('Delta FFAEU2 guest handshake — opcode=13 payload=null (no JWT)');
     sendPacket(w);
-    // Delta can accept the profile metadata before serverInfo; sending it here
-    // removes the extra wait before opcode 10/11 names arrive.
-    try { sendPlayerInfo(); } catch (_) {}
     // Wait for server opcode=0/serverInfo before sending spawn.
   }
 
@@ -757,7 +723,7 @@
         var reserved = !!r.readUInt8();
         var color = (red << 16) | (green << 8) | blue;
         // Delta opcode 10 has no clan field in the add record.
-        playerClients[id] = { clientId: id, isBot: isBot, nick: nick, name: nick, tag: tag, color: color, reserved: reserved };
+        playerClients[id] = { clientId: id, isBot: isBot, nick: nick, tag: tag, color: color, reserved: reserved };
       }
       var upd = r.readUInt8();
       for (i = 0; i < upd; i++) {
@@ -766,7 +732,7 @@
         var row = playerClients[uid];
         if (flags & 1) {
           var nn = r.readUTF16StringLength();
-          if (row) { row.nick = nn; row.name = nn; }
+          if (row) row.nick = nn;
         }
         if (flags & 2) {
           var tg = r.readUTF16StringLength();
@@ -783,8 +749,6 @@
       }
       var del = r.readUInt8();
       for (i = 0; i < del; i++) delete playerClients[r.readUInt16()];
-      refreshCellNames();
-      updateFfaLeaderboard();
     } catch (err) {
       log('opcode10 skipped safely at offset=' + start + ' error=' + (err && err.message || err));
     }
@@ -823,8 +787,6 @@
     }
     var del = r.readUInt8();
     for (i = 0; i < del; i++) delete players[r.readUInt16()];
-    refreshCellNames();
-    updateFfaLeaderboard();
     adoptOwnCellsFromWorld();
     if (playRequested && authCompleted && !spawned) maybeSpawn();
   }
@@ -867,9 +829,7 @@
           log('ALLOC 8 blob=' + blobLen + ' ok=' + !!ok);
         }
       }
-      var cellRec = players[pid];
-      var cellClient = cellRec ? playerClients[cellRec.clientId] : playerClients[pid];
-      cells[id] = { id: id, x: x, y: y, r: size, tx: x, ty: y, tr: size, mine: mine, color: color, kind: kind, pid: pid, clientId: cellRec ? cellRec.clientId : pid, nick: cellClient ? (cellClient.nick || cellClient.name || '') : '', tag: cellClient ? (cellClient.tag || '') : '', skin: (cellRec && cellRec.skin) || '' };
+      cells[id] = { id: id, x: x, y: y, r: size, tx: x, ty: y, tr: size, mine: mine, color: color, kind: kind, pid: pid, skin: (players[pid] && players[pid].skin) || '' };
       if (mine) claimOwnCell(id, pid);
     }
     var updCount = r.readUInt16();
@@ -916,11 +876,6 @@
     if (r.offset + 1 <= r.view.byteLength) r.readUInt8();
     if (r.offset + 4 <= r.view.byteLength) r.readUInt32();
     flushWasmAlloc();
-    // Resolve names immediately when a new world cell is created. Delta may
-    // deliver opcode 20 before opcode 10/11, so the next packet must repaint
-    // the existing rows without waiting for another leaderboard cycle.
-    refreshCellNames();
-    updateFfaLeaderboard();
   }
 
   function handleOpcode21(r) {
@@ -1149,53 +1104,10 @@
     return theme;
   }
 
-  function resolvePlayerClient(cell) {
-    if (!cell) return null;
-    var rec = players[cell.pid];
-    var candidates = [];
-    if (rec) candidates.push(rec.clientId, rec.playerId);
-    candidates.push(cell.clientId, cell.pid);
-    for (var i = 0; i < candidates.length; i++) {
-      var key = candidates[i];
-      if (key === undefined || key === null) continue;
-      var pc = playerClients[key];
-      if (pc && (pc.nick || pc.name || pc.tag)) return pc;
-    }
-    return null;
-  }
-
   function cellName(cell) {
-    var pc = resolvePlayerClient(cell);
-    return (cell && (cell.nick || cell.name)) || (pc && (pc.nick || pc.name)) || '';
-  }
-
-  function refreshCellNames() {
-    var ids = Object.keys(cells);
-    for (var i = 0; i < ids.length; i++) {
-      var cell = cells[ids[i]];
-      if (!cell || cell.kind !== 0) continue;
-      var pc = resolvePlayerClient(cell);
-      if (pc && (pc.nick || pc.name)) cell.nick = pc.nick || pc.name;
-      if (pc && pc.tag) cell.tag = pc.tag;
-      if (cell.nick && cell.kind === 0) cell.__nameReadyAt = Date.now();
-    }
-  }
-
-  function updateFfaLeaderboard() {
-    var root = document.getElementById('leaderboard-positions');
-    if (!root) return;
-    var rows = root.querySelectorAll('.lb-position');
-    if (!rows || !rows.length) return;
-    var list = Object.keys(cells).map(function (id) { return cells[id]; }).filter(function (c) { return c && c.kind === 0; });
-    list.sort(function (a, b) { return (b.r || 0) - (a.r || 0); });
-    for (var i = 0; i < rows.length; i++) {
-      var nameEl = rows[i].querySelector('[lbdata="name"]');
-      if (!nameEl) continue;
-      var cell = list[i];
-      // A world packet can precede opcode 10/11. Keep the row blank until
-      // the Delta client map resolves it instead of exposing a fake name.
-      nameEl.textContent = cell ? (cellName(cell) || '') : '';
-    }
+    var rec = players[cell.pid];
+    var pc = rec ? playerClients[rec.clientId] : playerClients[cell.pid];
+    return (pc && pc.nick) || '';
   }
 
   function cellSkinUrl(cell) {
@@ -1328,9 +1240,6 @@
     ctx.imageSmoothingQuality = 'high';
     fpsFrames++;
     var now = Date.now();
-    // deo.onyx may create/rebuild #teamlist-alive after SPAWN_CONFIRMED.
-    // Keep the guest Active counter synchronized with the actual FFA state.
-    setAliveHud();
     if (!fpsLast) fpsLast = now;
     if (now - fpsLast >= 500) {
       fpsValue = Math.round(fpsFrames * 1000 / (now - fpsLast));
@@ -1341,10 +1250,6 @@
       var hud = 'FPS: ' + fpsValue + '   Ping: ' + pingMs + ' ms' + (spawned ? '   Mass: ' + massSum : '');
       if (stats) stats.textContent = hud;
       if (global.ONYXUi && global.ONYXUi.updateStats) global.ONYXUi.updateStats(hud);
-    }
-    if (now - lastLeaderboardAt >= 500) {
-      lastLeaderboardAt = now;
-      updateFfaLeaderboard();
     }
     var ids = Object.keys(cells);
     var i;
@@ -1546,7 +1451,6 @@
 
   function resetSession() {
     authCompleted = false;
-    guestHandshakeSent = false;
     clientReady = false;
     worldSeen = false;
     spawned = false;
@@ -1591,9 +1495,6 @@
         setPhase('CONNECTED');
         logWs('OPEN');
         log('WS_OPEN');
-        // Delta guest accepts the handshake immediately after the socket opens.
-        // Waiting for legacy opcode 8 can leave the client stuck at CONNECTED.
-        sendAuth();
       },
       onClose: handleCodecClose,
       onMessage: onServerPacket,
@@ -1705,15 +1606,9 @@
 
   function interceptUi() {
     restoreProfileFields();
-    ensureDeltaSelected();
-    var selectAttempts = 0;
-    var selectTimer = setInterval(function () {
-      selectAttempts++;
-      if (ensureDeltaSelected() || selectAttempts > 20) clearInterval(selectTimer);
-    }, 150);
     document.addEventListener('click', function (e) {
       var playBtn = e.target && e.target.closest && e.target.closest('#button-play');
-      if (!playBtn || global.__ONYX_DEO_INPUT_FALLBACK__ || !isFfaSelected()) return;
+      if (!playBtn || !isFfaSelected()) return;
       e.preventDefault();
       e.stopImmediatePropagation();
       playFromUi();
@@ -1721,7 +1616,7 @@
 
     document.addEventListener('click', function (e) {
       var spec = e.target && e.target.closest && e.target.closest('#button-spectate');
-      if (!spec || global.__ONYX_DEO_INPUT_FALLBACK__ || !isFfaSelected()) return;
+      if (!spec || !isFfaSelected()) return;
       if (playRequested && spawnSent && !spawned) return;
       e.preventDefault();
       e.stopImmediatePropagation();
