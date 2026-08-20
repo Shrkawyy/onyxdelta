@@ -455,8 +455,13 @@
     if (origOnMessage) {
       sc.onMessage = function (data, tab) {
         var u8 = toU8(data);
-        var result = origOnMessage(data, tab);
-        if (u8 && u8.length && isNewFfaHost(lastConnectHost || selectedRaw())) {
+        var isDelta = u8 && u8.length && isNewFfaHost(lastConnectHost || selectedRaw());
+        // deo uses the old opcode-10 string layout and throws on Delta packets.
+        // The isolated FFA parser owns player names, so do not feed Delta opcode 10 to deo.
+        var skipDeoNames = isDelta && (u8[0] === 10);
+        if (skipDeoNames) log('DECODE', 'skip deo opcode=10; FFA parser owns Delta player names');
+        var result = skipDeoNames ? null : origOnMessage(data, tab);
+        if (isDelta) {
           if (shouldLogPacket(u8, 'in')) log('PACKET-IN', describePacket(u8, 'in') + ' tab=' + (tab || 1));
           if (u8[0] === 0) {
             log('HANDSHAKE', describePacket(u8, 'in'));
