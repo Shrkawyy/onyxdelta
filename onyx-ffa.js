@@ -64,6 +64,7 @@
   var fpsLast = 0;
   var fpsValue = 0;
   var lastLeaderboardAt = 0;
+  var ffaLeaderboardRows = [];
   var camX = 0;
   var camY = 0;
   var camZoom = 0.18;
@@ -924,15 +925,22 @@
   }
 
   function handleOpcode21(r) {
-    var rows = [];
-    for (var n = r.readInt8(); n--;) {
+    var parsed = [];
+    var count = r.readInt8();
+    if (count < 0) count = 0;
+    for (var n = 0; n < count && r.offset + 6 <= r.view.byteLength; n++) {
       var cid = r.readUInt16();
       var score = r.readUInt32();
-      var pc = playerClients[cid];
-      rows.push({ name: (pc && pc.nick) || ('#' + cid), score: score });
+      parsed.push({ clientId: cid, score: score });
     }
-    rows.sort(function (a, b) { return b.score - a.score; });
+    parsed.sort(function (a, b) { return b.score - a.score; });
+    ffaLeaderboardRows = parsed;
+    var rows = parsed.map(function (row) {
+      var pc = playerClients[row.clientId];
+      return { name: (pc && (pc.nick || pc.name)) || ('#' + row.clientId), score: row.score };
+    });
     if (global.ONYXUi && global.ONYXUi.updateLeaderboard) global.ONYXUi.updateLeaderboard(rows);
+    updateFfaLeaderboard();
   }
 
   function onServerPacket(buf) {
@@ -1186,15 +1194,21 @@
     if (!root) return;
     var rows = root.querySelectorAll('.lb-position');
     if (!rows || !rows.length) return;
-    var list = Object.keys(cells).map(function (id) { return cells[id]; }).filter(function (c) { return c && c.kind === 0; });
-    list.sort(function (a, b) { return (b.r || 0) - (a.r || 0); });
+    var list;
+    if (ffaLeaderboardRows.length) {
+      list = ffaLeaderboardRows.map(function (row) {
+        var pc = playerClients[row.clientId];
+        return { name: (pc && (pc.nick || pc.name)) || ('#' + row.clientId), score: row.score };
+      });
+    } else {
+      list = Object.keys(cells).map(function (id) { return cells[id]; }).filter(function (c) { return c && c.kind === 0; });
+      list.sort(function (a, b) { return (b.r || 0) - (a.r || 0); });
+    }
     for (var i = 0; i < rows.length; i++) {
       var nameEl = rows[i].querySelector('[lbdata="name"]');
       if (!nameEl) continue;
-      var cell = list[i];
-      // A world packet can precede opcode 10/11. Keep the row blank until
-      // the Delta client map resolves it instead of exposing a fake name.
-      nameEl.textContent = cell ? (cellName(cell) || '') : '';
+      var row = list[i];
+      nameEl.textContent = row ? (row.name || cellName(row) || '') : '';
     }
   }
 
@@ -1556,6 +1570,7 @@
     cells = Object.create(null);
     players = Object.create(null);
     playerClients = Object.create(null);
+    ffaLeaderboardRows = [];
     spawnSent = false;
     spawnAttempts = 0;
     spawnPidLogs = 0;
