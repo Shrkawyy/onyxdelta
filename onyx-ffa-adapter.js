@@ -305,6 +305,44 @@
     return false;
   }
 
+  function uiNick() {
+    var el = document.getElementById('nick');
+    return String((el && el.value) || 'player').trim().substring(0, 32) || 'player';
+  }
+
+  function uiTag() {
+    var el = document.getElementById('tag');
+    return String((el && el.value) || '').trim().substring(0, 5);
+  }
+
+  function deltaTextPacket(opcode, text) {
+    text = String(text || '');
+    var out = new Uint8Array(2 + text.length * 2);
+    out[0] = opcode;
+    out[1] = text.length;
+    for (var i = 0; i < text.length; i++) {
+      var code = text.charCodeAt(i);
+      out[2 + i * 2] = code & 255;
+      out[3 + i * 2] = (code >>> 8) & 255;
+    }
+    return out;
+  }
+
+  function sendDeltaEarlySpawn(sc, tab) {
+    if (!sc || !origSend || !global.__ONYX_DELTA_PLAY_REQUESTED__) return;
+    sc.__onyxDeltaSpawnedTabs = sc.__onyxDeltaSpawnedTabs || {};
+    if (sc.__onyxDeltaSpawnedTabs[tab]) return;
+    try {
+      origSend(deltaTextPacket(10, uiNick()), tab);
+      origSend(deltaTextPacket(11, uiTag()), tab);
+      origSend(new Uint8Array([0, tab & 255]), tab);
+      sc.__onyxDeltaSpawnedTabs[tab] = true;
+      log('INPUT', 'early Delta spawn sent tab=' + tab + ' name=' + uiNick());
+    } catch (err) {
+      log('INPUT', 'early Delta spawn failed tab=' + tab + ' — ' + (err && err.message || err));
+    }
+  }
+
   function isJwtLike(token) {
     return /^[\w-]+\.[\w-]+\.[\w-]+$/.test(String(token || ''));
   }
@@ -530,8 +568,10 @@
           if (u8[0] === 0) {
             log('HANDSHAKE', describePacket(u8, 'in'));
             log('GAME-STATE', 'serverInfo received — isolated FFA input path active');
-            // Do not inject deo's legacy spectate-ready opcode 20 here.
-            // ONYXFfa sends the correct play/spectate cursor after the user's action.
+            // Delta does not require waiting for opcode 10/11/20 before spawn.
+            // If Play was already requested, send each tab's metadata + spawn
+            // immediately after serverInfo to match the native Delta timing.
+            sendDeltaEarlySpawn(sc, tab || 1);
           }
           if (u8[0] === 8) log('AUTH', 'server opcode=8 → deo auth()');
           if (u8[0] === 7) log('HANDSHAKE', 'server captcha opcode=7 — deo sends opcode 14');
@@ -581,7 +621,8 @@
         ensureFfaSelection();
         syncFfaType();
         if (isNewFfaSelected() && USE_DEO_INPUT_FALLBACK) {
-          log('INPUT', 'PLAY → deo.onyx Delta fallback; guest SC input enabled');
+          global.__ONYX_DELTA_PLAY_REQUESTED__ = true;
+          log('INPUT', 'PLAY → deo.onyx Delta fallback; early guest spawn enabled');
           return;
         }
         if (isNewFfaSelected()) {
@@ -594,6 +635,13 @@
           return;
         }
         log('INPUT', 'PLAY → deo.onyx #button-play (legacy path)');
+      }, true);
+      document.addEventListener('click', function (e) {
+        var spec = e.target && e.target.closest && e.target.closest('#button-spectate');
+        if (!spec || !isNewFfaSelected()) return;
+        global.__ONYX_DELTA_PLAY_REQUESTED__ = false;
+        if (global.SC) global.SC.__onyxDeltaSpawnedTabs = {};
+        log('INPUT', 'SPECTATE → early spawn disabled');
       }, true);
     }
   }
