@@ -160,7 +160,7 @@
         if (!moduleInstance || typeof moduleInstance.create !== 'function') {
           throw new Error('WASM create() missing');
         }
-        if (!url || url.indexOf('wss://eu.mi.com:2001') !== 0) {
+        if (!url || url.indexOf('wss://eu.senpa.io:2001') !== 0) {
           throw new Error('[FFA] Invalid codec URL: ' + url);
         }
         socket = moduleInstance.create(

@@ -4,14 +4,14 @@
  * Load BEFORE deo.onyx so auto-connect uses wsUrl (?po=&tid=) instead of ?password=.
  *
  * Confirmed deo URL: wss://<host>?password=
- * Confirmed Delta FFAEU2 URL: wss://eu.mi.com:2001
+ * Confirmed Delta FFAEU2 URL: wss://eu.senpa.io:2001
  * Confirmed auth: opcode 13. FFA uses UInt16 length + UTF-16; deo writeString16 uses UInt8 length.
  */
 (function (global) {
   'use strict';
 
-  var NEW_FFA_HOST = 'eu.mi.com:2001';
-  var NEW_FFA_IDS = { 'ffa-eu': 1, 'delta-ffaeu2': 1, 'eu.mi.com:2001': 1 };
+  var NEW_FFA_HOST = 'eu.senpa.io:2001';
+  var NEW_FFA_IDS = { 'ffa-eu': 1, 'delta-ffaeu2': 1, 'eu.senpa.io:2001': 1 };
   var TID_KEY = 'kateronyx:delta-tid';
   var SECONDARY_SESSION_KEY = 'senpaio:session:secondary';
   var AUTH_ORIGIN = 'https://api.senpa.io';

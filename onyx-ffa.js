@@ -1,7 +1,7 @@
 /**
  * ONYX FFA client.
  *
- * index.html → onyx-ffa.js → isolated codec worker (bundle.wasm) → wss://eu.mi.com:2001
+ * index.html → onyx-ffa.js → isolated codec worker (bundle.wasm) → wss://eu.senpa.io:2001
  *
  * Jaxx/og is protocol source only. The Jaxx lobby, bundle.js app, iframe, and
  * page-global WebSocket hook must not run next to deo.onyx.beautified.js.
@@ -12,9 +12,9 @@
   var FFA_ID = 'delta-ffaeu2';
   var FFA_VALUE = 'delta-ffaeu2';
   var FFA_TYPE = 'ffa';
-  var FFA_HOST = 'eu.mi.com:2001';
-  var FFA_WS = 'wss://eu.mi.com:2001';
-  var LEGACY_HOSTS = /(?:eu|us)\.senpa\.io:(?:2001|2002|1200|9999|4002)/;
+  var FFA_HOST = 'eu.senpa.io:2001';
+  var FFA_WS = 'wss://eu.senpa.io:2001';
+  var LEGACY_HOSTS = /(?:eu\.mi\.com:2001|(?:eu1|us|dual|mega)\.senpa\.io:(?:2001|2002|1200|9999|4002))/;
   var AUTH_ORIGIN = 'https://api.senpa.io';
   var SESSION_KEY = 'senpaio:session';
   var TOKEN_KEY = 'senpa_auth_token';
@@ -133,7 +133,7 @@
     var v = String(value);
     if (v === FFA_VALUE || v === FFA_ID || v === FFA_HOST || v === FFA_WS) return true;
     if (v.indexOf('ffa:') === 0) return true;
-    if (v.indexOf('eu.mi.com:2001') !== -1) return true;
+    if (v.indexOf('eu.senpa.io:2001') !== -1) return true;
     return false;
   }
 
