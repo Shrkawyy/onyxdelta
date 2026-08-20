@@ -477,11 +477,19 @@
       sc.onMessage = function (data, tab) {
         var u8 = toU8(data);
         var isDelta = u8 && u8.length && isNewFfaHost(lastConnectHost || selectedRaw());
-        // deo uses the old opcode-10 string layout and throws on Delta packets.
-        // The isolated FFA parser owns player names, so do not feed Delta opcode 10 to deo.
-        var skipDeoNames = isDelta && (u8[0] === 10);
-        if (skipDeoNames) log('DECODE', 'skip deo opcode=10; FFA parser owns Delta player names');
-        var result = skipDeoNames ? null : origOnMessage(data, tab);
+        // deo uses legacy packet layouts. Delta opcode 10 (names), opcode 22
+        // (split/control), and opcode 42 (unknown Delta control) must not enter
+        // that parser; one uncaught exception otherwise breaks a Tab's input loop.
+        var skipDeoDelta = isDelta && (u8[0] === 10 || u8[0] === 22 || u8[0] === 42);
+        if (skipDeoDelta) log('DECODE', 'skip deo Delta opcode=' + u8[0] + ' tab=' + (tab || 1));
+        var result = null;
+        if (!skipDeoDelta) {
+          try {
+            result = origOnMessage(data, tab);
+          } catch (err) {
+            log('DECODE', 'deo parser exception isolated opcode=' + (u8[0] || 0) + ' tab=' + (tab || 1) + ' — ' + (err && err.message || err));
+          }
+        }
         if (isDelta) {
           if (shouldLogPacket(u8, 'in')) log('PACKET-IN', describePacket(u8, 'in') + ' tab=' + (tab || 1));
           if (u8[0] === 0) {
