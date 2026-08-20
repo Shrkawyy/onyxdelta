@@ -12,8 +12,6 @@
 
   var NEW_FFA_HOST = 'eu.senpa.io:2001';
   var NEW_FFA_IDS = { 'ffa-eu': 1, 'delta-ffaeu2': 1, 'eu.senpa.io:2001': 1 };
-  // Use deo.onyx's live SC input path for Delta Play/Spectate.
-  var USE_DEO_INPUT_FALLBACK = true;
   var TID_KEY = 'kateronyx:delta-tid';
   var SECONDARY_SESSION_KEY = 'senpaio:session:secondary';
   var AUTH_ORIGIN = 'https://api.senpa.io';
@@ -35,11 +33,6 @@
   var origOnError = null;
   var jwtNullWarned = false;
   var wasmWaitTimer = null;
-  // Delta FFA sends leaderboard rows by client id; keep a small side map so
-  // the legacy deo leaderboard decoder never has to touch the new packet shape.
-  var deltaClients = Object.create(null);
-  var deltaLeaderboard = [];
-  var deltaLeaderboardHash = '';
 
   function log(tag, msg) {
     console.log('[NEW-SERVER] [' + tag + '] ' + msg);
@@ -74,25 +67,6 @@
     var el = document.getElementById('servers');
     if (!el || el.selectedIndex < 0) return null;
     return el.options[el.selectedIndex];
-  }
-
-  function ensureFfaSelection() {
-    var el = document.getElementById('servers');
-    if (!el || !el.options || !el.options.length) return false;
-    var current = selectedOption();
-    if (current && (current.getAttribute('data-onyx-type') === 'ffa' || current.getAttribute('data-onyx-host') === NEW_FFA_HOST || NEW_FFA_IDS[current.value])) return true;
-    for (var i = 0; i < el.options.length; i++) {
-      var opt = el.options[i];
-      var marker = [opt.value || '', opt.textContent || '', opt.getAttribute('data-onyx-id') || '', opt.getAttribute('data-onyx-host') || '', opt.getAttribute('data-onyx-type') || ''].join(' ').toLowerCase();
-      if (marker.indexOf('delta-ffaeu2') !== -1 || marker.indexOf('delta ffaeu2') !== -1 || marker.indexOf(NEW_FFA_HOST) !== -1) {
-        if (opt.getAttribute('data-onyx-host')) opt.value = opt.getAttribute('data-onyx-host');
-        el.selectedIndex = i;
-        try { el.dispatchEvent(new Event('change', { bubbles: true })); } catch (_) {}
-        log('CONNECT', 'PLAY auto-selected Delta FFAEU2 host=' + el.value);
-        return true;
-      }
-    }
-    return false;
   }
 
   function mapHost(raw) {
@@ -164,145 +138,6 @@
       return new Uint8Array(buf.buffer, buf.byteOffset || 0, buf.byteLength || buf.buffer.byteLength);
     }
     return null;
-  }
-
-  function u16(u8, p) {
-    return u8[p] | (u8[p + 1] << 8);
-  }
-
-  function readUtf16(u8, state, length) {
-    if (length < 0 || state.p + length * 2 > u8.length) throw new RangeError('utf16 out of bounds');
-    var out = '';
-    for (var i = 0; i < length; i++) {
-      out += String.fromCharCode(u8[state.p] | (u8[state.p + 1] << 8));
-      state.p += 2;
-    }
-    return out;
-  }
-
-  function runtimeClientName(id) {
-    var roots = [global.gs, global.__ONYX_GS__, global.zt, global];
-    var keys = ['clientsList', 'playerClients', 'clients', 'playersList', 'players'];
-    for (var r = 0; r < roots.length; r++) {
-      var root = roots[r];
-      if (!root) continue;
-      for (var k = 0; k < keys.length; k++) {
-        var collection = root[keys[k]];
-        if (!collection) continue;
-        var item = null;
-        try {
-          item = typeof collection.get === 'function' ? collection.get(id) : collection[id];
-        } catch (_) { item = null; }
-        if (!item) continue;
-        var name = item.nick || item.name || item.nickname || item.playerName || '';
-        if (name) return String(name);
-      }
-    }
-    return '';
-  }
-
-  function renderDeltaLeaderboard() {
-    var root = document.getElementById('leaderboard-positions');
-    if (!root) return;
-    var rows = root.querySelectorAll('.lb-position');
-    if (!rows || !rows.length) return;
-    for (var i = 0; i < rows.length; i++) {
-      var el = rows[i].querySelector('[lbdata="name"]');
-      if (!el) continue;
-      var row = deltaLeaderboard[i];
-      if (!row) { el.textContent = ''; continue; }
-      var pc = deltaClients[row.clientId];
-      var name = pc && (pc.nick || pc.name) || runtimeClientName(row.clientId);
-      // Keep an id visible when the server has not sent its client map yet;
-      // this prevents stale/blank rows and is replaced automatically later.
-      el.textContent = name || ('#' + row.clientId);
-    }
-  }
-
-  function parseDeltaClientPacket(u8) {
-    if (!u8 || u8.length < 4 || u8[0] !== 10) return false;
-    var state = { p: 1 };
-    var staged = [];
-    var updates = [];
-    var deleted = [];
-    try {
-      var add = u8[state.p++];
-      for (var i = 0; i < add; i++) {
-        if (state.p + 3 > u8.length) throw new RangeError('client add header');
-        var id = u16(u8, state.p); state.p += 2;
-        var isBot = !!u8[state.p++];
-        var nick = readUtf16(u8, state, u8[state.p++]);
-        var tag = readUtf16(u8, state, u8[state.p++]);
-        if (state.p + 4 > u8.length) throw new RangeError('client color');
-        staged.push({ id: id, isBot: isBot, nick: nick, name: nick, tag: tag,
-          color: (u8[state.p] << 16) | (u8[state.p + 1] << 8) | u8[state.p + 2],
-          reserved: !!u8[state.p + 3] });
-        state.p += 4;
-      }
-      if (state.p >= u8.length) throw new RangeError('client update count');
-      var upd = u8[state.p++];
-      for (i = 0; i < upd; i++) {
-        if (state.p + 3 > u8.length) throw new RangeError('client update header');
-        var uid = u16(u8, state.p); state.p += 2;
-        var flags = u8[state.p++];
-        var item = { id: uid, flags: flags };
-        if (flags & 1) item.nick = readUtf16(u8, state, u8[state.p++]);
-        if (flags & 2) item.tag = readUtf16(u8, state, u8[state.p++]);
-        if (flags & 4) {
-          if (state.p + 4 > u8.length) throw new RangeError('client update color');
-          item.color = (u8[state.p] << 16) | (u8[state.p + 1] << 8) | u8[state.p + 2];
-          item.reserved = !!u8[state.p + 3];
-          state.p += 4;
-        }
-        updates.push(item);
-      }
-      if (state.p >= u8.length) throw new RangeError('client delete count');
-      var del = u8[state.p++];
-      if (state.p + del * 2 > u8.length) throw new RangeError('client deletes');
-      for (i = 0; i < del; i++) { deleted.push(u16(u8, state.p)); state.p += 2; }
-    } catch (err) {
-      log('DECODE', 'Delta opcode=10 ignored safely: ' + (err && err.message || err));
-      return false;
-    }
-    staged.forEach(function (item) { deltaClients[item.id] = item; });
-    updates.forEach(function (item) {
-      var row = deltaClients[item.id] || (deltaClients[item.id] = { id: item.id });
-      if (item.nick !== undefined) { row.nick = item.nick; row.name = item.nick; }
-      if (item.tag !== undefined) row.tag = item.tag;
-      if (item.color !== undefined) { row.color = item.color; row.reserved = item.reserved; }
-    });
-    deleted.forEach(function (id) { delete deltaClients[id]; });
-    renderDeltaLeaderboard();
-    return true;
-  }
-
-  function parseDeltaLeaderboardPacket(u8) {
-    if (!u8 || u8.length < 2 || u8[0] !== 21) return false;
-    var count = u8[1] & 0x7f;
-    var max = Math.min(count, Math.floor((u8.length - 2) / 6));
-    var rows = [];
-    for (var i = 0; i < max; i++) {
-      var p = 2 + i * 6;
-      rows.push({ clientId: u16(u8, p), score: (u8[p + 2] | (u8[p + 3] << 8) | (u8[p + 4] << 16) | (u8[p + 5] << 24)) >>> 0 });
-    }
-    rows.sort(function (a, b) { return b.score - a.score; });
-    deltaLeaderboard = rows;
-    var hash = rows.map(function (row) { return row.clientId + ':' + row.score; }).join('|');
-    if (hash !== deltaLeaderboardHash) {
-      deltaLeaderboardHash = hash;
-      log('LEADERBOARD', 'rows=' + rows.length + ' names=' + rows.map(function (row) {
-        var pc = deltaClients[row.clientId];
-        return (pc && (pc.nick || pc.name)) || runtimeClientName(row.clientId) || ('#' + row.clientId);
-      }).join(', '));
-    }
-    renderDeltaLeaderboard();
-    return true;
-  }
-
-  function handleDeltaPacket(u8) {
-    if (!u8 || !u8.length) return;
-    if (u8[0] === 10) parseDeltaClientPacket(u8);
-    else if (u8[0] === 21) parseDeltaLeaderboardPacket(u8);
   }
 
   function buildAuthPacket(token) {
@@ -423,11 +258,7 @@
 
   function syncFfaType() {
     if (!isNewFfaSelected()) return;
-    // deo's renderer branches on this flag. Create the public holder if the
-    // legacy bundle has not exposed it yet, then re-apply it on every packet.
-    if (!global.zt || typeof global.zt !== 'object') global.zt = {};
-    global.zt.ffaServerType = true;
-    global.__ONYX_FFA_MODE__ = true;
+    if (global.zt && typeof global.zt === 'object') global.zt.ffaServerType = true;
     var keys = ['cellsIDTab1', 'cellsIDTab2'];
     var roots = [global.__ONYX_GS__, global.gs, global];
     for (var r = 0; r < roots.length; r++) {
@@ -560,12 +391,6 @@
     sc.init = function (host, tab) {
       var mapped = mapHost(host);
       lastConnectHost = mapped;
-      if ((tab || 1) === 1 && isNewFfaHost(mapped)) {
-        deltaClients = Object.create(null);
-        deltaLeaderboard = [];
-        deltaLeaderboardHash = '';
-        renderDeltaLeaderboard();
-      }
       spectateSent = false;
       cellInLog = 0;
       cellOutLog = 0;
@@ -630,33 +455,18 @@
     if (origOnMessage) {
       sc.onMessage = function (data, tab) {
         var u8 = toU8(data);
-        var isDelta = u8 && u8.length && isNewFfaHost(lastConnectHost || selectedRaw());
-        // deo uses the old opcode-10 string layout and throws on Delta packets.
-        // The isolated FFA parser owns player names, so do not feed Delta opcode 10 to deo.
-        // The first worldUpdate can arrive immediately after spawn. Normalize
-        // the FFA state before deo touches its cellsIDTab* collections; doing
-        // this afterward allows the legacy decoder to call Array.has(...).
-        if (isDelta) syncFfaType();
-        var skipDeoPacket = isDelta && (u8[0] === 10 || u8[0] === 21);
-        if (skipDeoPacket) log('DECODE', 'skip deo opcode=' + u8[0] + '; adapter owns Delta packet');
-        var result = null;
-        if (!skipDeoPacket) {
-          try {
-            result = origOnMessage(data, tab);
-          } catch (err) {
-            // A legacy decoder must never abort the live socket on a new-server
-            // packet. Keep the FFA input/render loop alive and continue parsing.
-            log('DECODE', 'deo packet ignored safely opcode=' + u8[0] + ' error=' + (err && err.message || err));
-          }
-        }
-        if (isDelta) {
-          handleDeltaPacket(u8);
+        var result = origOnMessage(data, tab);
+        if (u8 && u8.length && isNewFfaHost(lastConnectHost || selectedRaw())) {
           if (shouldLogPacket(u8, 'in')) log('PACKET-IN', describePacket(u8, 'in') + ' tab=' + (tab || 1));
           if (u8[0] === 0) {
             log('HANDSHAKE', describePacket(u8, 'in'));
-            log('GAME-STATE', 'serverInfo received — isolated FFA input path active');
-            // Do not inject deo's legacy spectate-ready opcode 20 here.
-            // ONYXFfa sends the correct play/spectate cursor after the user's action.
+            log('GAME-STATE', 'serverInfo received — deo worldUpdate/PIXI path');
+            if (!spectateSent) {
+              spectateSent = true;
+              try { sendDeoSpectate(sc); } catch (err) {
+                log('INPUT', 'spectate-ready skip ' + (err && err.message || err));
+              }
+            }
           }
           if (u8[0] === 8) log('AUTH', 'server opcode=8 → deo auth()');
           if (u8[0] === 7) log('HANDSHAKE', 'server captcha opcode=7 — deo sends opcode 14');
@@ -703,12 +513,7 @@
       document.addEventListener('click', function (e) {
         var play = e.target && e.target.closest && e.target.closest('#button-play');
         if (!play) return;
-        ensureFfaSelection();
         syncFfaType();
-        if (isNewFfaSelected() && USE_DEO_INPUT_FALLBACK) {
-          log('INPUT', 'PLAY → deo.onyx Delta fallback; guest SC input enabled');
-          return;
-        }
         if (isNewFfaSelected()) {
           e.preventDefault();
           e.stopImmediatePropagation();
@@ -762,7 +567,6 @@
     readJwt: readJwt
   };
   global.ONYXFfaAdapter = global.__ONYX_ADAPTER__;
-  global.__ONYX_DEO_INPUT_FALLBACK__ = USE_DEO_INPUT_FALLBACK;
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
   else boot();
