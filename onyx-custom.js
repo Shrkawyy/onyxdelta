@@ -92,10 +92,10 @@
 
   /* Default FFA host: Delta FFAEU2 */
   (function seedFfaExtras() {
-    var host = 'eu.mi.com:2001';
+    var host = 'eu.senpa.io:2001';
     try {
       var sel = document.getElementById('servers');
-      if (sel && sel.value) host = sel.value === 'ffa-eu' || sel.value === 'delta-ffaeu2' ? 'eu.mi.com:2001' : 'eu.mi.com:2001';
+      if (sel && sel.value) host = sel.value === 'ffa-eu' || sel.value === 'delta-ffaeu2' ? 'eu.senpa.io:2001' : 'eu.senpa.io:2001';
     } catch (_) {}
     var key = PREFIX + 'extras';
     var extras = readJSON(key);
