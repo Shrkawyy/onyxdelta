@@ -453,9 +453,15 @@
     authCompleted = true;
     clientReady = true;
     identityReady = true;
+    var guest = 'null';
+    var w = new Writer(3 + guest.length * 2);
+    w.writeUInt8(13);
+    w.writeUInt16(guest.length);
+    w.writeUTF16String(guest);
     logAuth('GUEST');
-    log('Delta FFAEU2 guest mode — JWT/login skipped');
-    if (playRequested) maybeSpawn();
+    log('Delta FFAEU2 guest handshake — opcode=13 payload=null (no JWT)');
+    sendPacket(w);
+    // Wait for server opcode=0/serverInfo before sending spawn.
   }
 
   function sendPlayerInfo() {
