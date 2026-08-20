@@ -12,6 +12,8 @@
 
   var NEW_FFA_HOST = 'eu.senpa.io:2001';
   var NEW_FFA_IDS = { 'ffa-eu': 1, 'delta-ffaeu2': 1, 'eu.senpa.io:2001': 1 };
+  // Use deo.onyx's live SC input path for Delta Play/Spectate.
+  var USE_DEO_INPUT_FALLBACK = true;
   var TID_KEY = 'kateronyx:delta-tid';
   var SECONDARY_SESSION_KEY = 'senpaio:session:secondary';
   var AUTH_ORIGIN = 'https://api.senpa.io';
@@ -67,6 +69,25 @@
     var el = document.getElementById('servers');
     if (!el || el.selectedIndex < 0) return null;
     return el.options[el.selectedIndex];
+  }
+
+  function ensureFfaSelection() {
+    var el = document.getElementById('servers');
+    if (!el || !el.options || !el.options.length) return false;
+    var current = selectedOption();
+    if (current && (current.getAttribute('data-onyx-type') === 'ffa' || current.getAttribute('data-onyx-host') === NEW_FFA_HOST || NEW_FFA_IDS[current.value])) return true;
+    for (var i = 0; i < el.options.length; i++) {
+      var opt = el.options[i];
+      var marker = [opt.value || '', opt.textContent || '', opt.getAttribute('data-onyx-id') || '', opt.getAttribute('data-onyx-host') || '', opt.getAttribute('data-onyx-type') || ''].join(' ').toLowerCase();
+      if (marker.indexOf('delta-ffaeu2') !== -1 || marker.indexOf('delta ffaeu2') !== -1 || marker.indexOf(NEW_FFA_HOST) !== -1) {
+        if (opt.getAttribute('data-onyx-host')) opt.value = opt.getAttribute('data-onyx-host');
+        el.selectedIndex = i;
+        try { el.dispatchEvent(new Event('change', { bubbles: true })); } catch (_) {}
+        log('CONNECT', 'PLAY auto-selected Delta FFAEU2 host=' + el.value);
+        return true;
+      }
+    }
+    return false;
   }
 
   function mapHost(raw) {
@@ -284,8 +305,63 @@
     return false;
   }
 
+  function uiNick() {
+    var el = document.getElementById('nick');
+    return String((el && el.value) || 'player').trim().substring(0, 32) || 'player';
+  }
+
+  function uiTag() {
+    var el = document.getElementById('tag');
+    return String((el && el.value) || '').trim().substring(0, 5);
+  }
+
+  function deltaTextPacket(opcode, text) {
+    text = String(text || '');
+    var out = new Uint8Array(2 + text.length * 2);
+    out[0] = opcode;
+    out[1] = text.length;
+    for (var i = 0; i < text.length; i++) {
+      var code = text.charCodeAt(i);
+      out[2 + i * 2] = code & 255;
+      out[3 + i * 2] = (code >>> 8) & 255;
+    }
+    return out;
+  }
+
+  function sendDeltaEarlySpawn(sc, tab) {
+    if (!sc || !origSend || !global.__ONYX_DELTA_PLAY_REQUESTED__) return;
+    sc.__onyxDeltaSpawnedTabs = sc.__onyxDeltaSpawnedTabs || {};
+    if (sc.__onyxDeltaSpawnedTabs[tab]) return;
+    try {
+      origSend(deltaTextPacket(10, uiNick()), tab);
+      origSend(deltaTextPacket(11, uiTag()), tab);
+      origSend(new Uint8Array([0, tab & 255]), tab);
+      sc.__onyxDeltaSpawnedTabs[tab] = true;
+      log('INPUT', 'early Delta spawn sent tab=' + tab + ' name=' + uiNick());
+    } catch (err) {
+      log('INPUT', 'early Delta spawn failed tab=' + tab + ' — ' + (err && err.message || err));
+    }
+  }
+
   function isJwtLike(token) {
     return /^[\w-]+\.[\w-]+\.[\w-]+$/.test(String(token || ''));
+  }
+
+  // deo still creates its legacy JWT opcode=13 packet. Delta FFAEU2 accepts
+  // the same opcode only with the UTF-16 string "null"; replacing the packet
+  // here keeps both SC tabs authenticated in guest mode.
+  function makeGuestAuthPacket() {
+    var text = 'null';
+    var out = new Uint8Array(3 + text.length * 2);
+    out[0] = 0x0d;
+    out[1] = text.length;
+    out[2] = 0;
+    for (var i = 0; i < text.length; i++) {
+      var code = text.charCodeAt(i);
+      out[3 + i * 2] = code & 255;
+      out[4 + i * 2] = (code >>> 8) & 255;
+    }
+    return out;
   }
 
   function secondaryTokenPresent() {
@@ -374,7 +450,18 @@
       event.stopImmediatePropagation();
       startSecondary(sc);
     }, true);
-    log('CONNECT', 'Secondary gate bound to first Tab');
+    // The UI also exposes explicit Tab 1/Tab 2 buttons. The old adapter only
+    // listened for the keyboard Tab key, leaving SC.Tab2 undefined for users
+    // who clicked the second tab button.
+    document.addEventListener('click', function (event) {
+      var tab2 = event.target && event.target.closest && event.target.closest('#rctab2');
+      if (!tab2 || secondaryStarted || secondaryPending) return;
+      if (!sc || !sc.Tab1 || sc.Tab2) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      startSecondary(sc);
+    }, true);
+    log('CONNECT', 'Secondary gate bound to keyboard Tab and #rctab2');
   }
 
   function hookSC() {
@@ -419,7 +506,12 @@
       }
       if (tab === 1 && isNewFfaHost(mapped)) {
         if (wasmWaitTimer) { clearInterval(wasmWaitTimer); wasmWaitTimer = null; }
-        log('CONNECT', 'tab=1 only — tab=2 waits for first Tab and Secondary login');
+        log('CONNECT', 'tab=1 ready — tab=2 waits for Tab button/keyboard');
+        if (multiboxOn()) {
+          setTimeout(function () {
+            if (!secondaryStarted && !secondaryPending && sc.Tab1 && !sc.Tab2) startSecondary(sc);
+          }, 0);
+        }
       }
       if ((tab || 1) === 2) {
         secondaryPending = false;
@@ -431,6 +523,7 @@
 
     sc.send = function (buf, tab) {
       var u8 = toU8(buf);
+      var sendBuf = buf;
       if (u8 && u8.length && isNewFfaHost(lastConnectHost || selectedRaw())) {
         if (u8[0] === 0x0d) {
           var authText = '';
@@ -443,30 +536,42 @@
           if (authText === 'null') {
             log('AUTH', 'opcode=13 guest null handshake allowed');
           } else {
-            log('AUTH', 'opcode=13 JWT packet suppressed — guest mode');
-            return;
+            sendBuf = makeGuestAuthPacket();
+            u8 = sendBuf;
+            log('AUTH', 'opcode=13 JWT replaced with guest null tab=' + (tab || 1));
           }
         }
         if (shouldLogPacket(u8, 'out')) log('PACKET-OUT', describePacket(u8, 'out') + ' tab=' + (tab || 1));
       }
-      return origSend(buf, tab);
+      return origSend(sendBuf, tab);
     };
 
     if (origOnMessage) {
       sc.onMessage = function (data, tab) {
         var u8 = toU8(data);
-        var result = origOnMessage(data, tab);
-        if (u8 && u8.length && isNewFfaHost(lastConnectHost || selectedRaw())) {
+        var isDelta = u8 && u8.length && isNewFfaHost(lastConnectHost || selectedRaw());
+        // deo uses legacy packet layouts. Delta opcode 10 (names), opcode 22
+        // (split/control), and opcode 42 (unknown Delta control) must not enter
+        // that parser; one uncaught exception otherwise breaks a Tab's input loop.
+        var skipDeoDelta = isDelta && (u8[0] === 10 || u8[0] === 22 || u8[0] === 42);
+        if (skipDeoDelta) log('DECODE', 'skip deo Delta opcode=' + u8[0] + ' tab=' + (tab || 1));
+        var result = null;
+        if (!skipDeoDelta) {
+          try {
+            result = origOnMessage(data, tab);
+          } catch (err) {
+            log('DECODE', 'deo parser exception isolated opcode=' + (u8[0] || 0) + ' tab=' + (tab || 1) + ' — ' + (err && err.message || err));
+          }
+        }
+        if (isDelta) {
           if (shouldLogPacket(u8, 'in')) log('PACKET-IN', describePacket(u8, 'in') + ' tab=' + (tab || 1));
           if (u8[0] === 0) {
             log('HANDSHAKE', describePacket(u8, 'in'));
-            log('GAME-STATE', 'serverInfo received — deo worldUpdate/PIXI path');
-            if (!spectateSent) {
-              spectateSent = true;
-              try { sendDeoSpectate(sc); } catch (err) {
-                log('INPUT', 'spectate-ready skip ' + (err && err.message || err));
-              }
-            }
+            log('GAME-STATE', 'serverInfo received — isolated FFA input path active');
+            // Delta does not require waiting for opcode 10/11/20 before spawn.
+            // If Play was already requested, send each tab's metadata + spawn
+            // immediately after serverInfo to match the native Delta timing.
+            sendDeltaEarlySpawn(sc, tab || 1);
           }
           if (u8[0] === 8) log('AUTH', 'server opcode=8 → deo auth()');
           if (u8[0] === 7) log('HANDSHAKE', 'server captcha opcode=7 — deo sends opcode 14');
@@ -513,7 +618,13 @@
       document.addEventListener('click', function (e) {
         var play = e.target && e.target.closest && e.target.closest('#button-play');
         if (!play) return;
+        ensureFfaSelection();
         syncFfaType();
+        if (isNewFfaSelected() && USE_DEO_INPUT_FALLBACK) {
+          global.__ONYX_DELTA_PLAY_REQUESTED__ = true;
+          log('INPUT', 'PLAY → deo.onyx Delta fallback; early guest spawn enabled');
+          return;
+        }
         if (isNewFfaSelected()) {
           e.preventDefault();
           e.stopImmediatePropagation();
@@ -524,6 +635,13 @@
           return;
         }
         log('INPUT', 'PLAY → deo.onyx #button-play (legacy path)');
+      }, true);
+      document.addEventListener('click', function (e) {
+        var spec = e.target && e.target.closest && e.target.closest('#button-spectate');
+        if (!spec || !isNewFfaSelected()) return;
+        global.__ONYX_DELTA_PLAY_REQUESTED__ = false;
+        if (global.SC) global.SC.__onyxDeltaSpawnedTabs = {};
+        log('INPUT', 'SPECTATE → early spawn disabled');
       }, true);
     }
   }
@@ -567,6 +685,8 @@
     readJwt: readJwt
   };
   global.ONYXFfaAdapter = global.__ONYX_ADAPTER__;
+  global.__ONYX_DEO_INPUT_FALLBACK__ = USE_DEO_INPUT_FALLBACK;
+  global.__ONYX_DEO_ONLY__ = USE_DEO_INPUT_FALLBACK;
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
   else boot();
