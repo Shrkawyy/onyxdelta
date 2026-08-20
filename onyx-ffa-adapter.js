@@ -30,6 +30,7 @@
   var passivePlayers = Object.create(null);
   var passiveRows = [];
   var passivePaintTimer = null;
+  var ffaPlayBridgeInstalled = false;
   var origInit = null;
   var origSend = null;
   var origOnMessage = null;
@@ -502,6 +503,45 @@
     log('CONNECT', 'Secondary gate bound to first Tab');
   }
 
+  function autoStartPrimaryTab(sc) {
+    if (!sc || !isNewFfaSelected()) return;
+    if (sc.__onyxPrimaryTabPending || sc.Tab1) return;
+    var attempts = sc.__onyxPrimaryTabAttempts || 0;
+    if (attempts >= 2) return;
+    sc.__onyxPrimaryTabAttempts = attempts + 1;
+    sc.__onyxPrimaryTabPending = true;
+    setTimeout(function () {
+      if (sc.Tab1) {
+        sc.__onyxPrimaryTabPending = false;
+        return;
+      }
+      try {
+        log('CONNECT', 'auto-starting Tab 1 after FFA Play attempt=' + sc.__onyxPrimaryTabAttempts);
+        sc.init(NEW_FFA_HOST, 1);
+      } catch (err) {
+        log('CONNECT', 'auto Tab 1 failed — ' + (err && err.message || err));
+      }
+      sc.__onyxPrimaryTabPending = false;
+      setTimeout(function () {
+        if (!sc.Tab1 && isNewFfaSelected() && (sc.__onyxPrimaryTabAttempts || 0) < 2) {
+          log('CONNECT', 'Tab 1 not ready after first init — retrying once');
+          autoStartPrimaryTab(sc);
+        }
+      }, 1200);
+    }, 0);
+  }
+
+  function installFfaPlayBridge(sc) {
+    if (ffaPlayBridgeInstalled || !global.ONYXFfa || typeof global.ONYXFfa.playFromUi !== 'function') return;
+    var originalPlay = global.ONYXFfa.playFromUi;
+    global.ONYXFfa.playFromUi = function () {
+      autoStartPrimaryTab(sc);
+      return originalPlay.apply(this, arguments);
+    };
+    ffaPlayBridgeInstalled = true;
+    log('CONNECT', 'FFA Play bridge installed — Tab 1 will start automatically');
+  }
+
   function hookSC() {
     var sc = global.SC;
     if (!sc || hooked) return !!hooked;
@@ -521,6 +561,9 @@
       cellOutLog = 0;
       syncFfaType();
       tab = tab || 1;
+      if (tab === 1 && isNewFfaHost(mapped)) {
+        sc.__onyxPrimaryTabPending = false;
+      }
       if (tab === 2 && !secondaryPending && !secondaryStarted && isNewFfaHost(mapped)) {
         log('CONNECT', 'tab=2 guest start allowed for Delta');
         secondaryPending = true;
@@ -604,6 +647,7 @@
     if (origOnClose) {
       sc.onClose = function (tab) {
         log('DISCONNECT', 'tab=' + (tab || 1));
+        if ((tab || 1) === 1) sc.__onyxPrimaryTabAttempts = 0;
         if ((tab || 1) === 2) { secondaryStarted = false; secondaryPending = false; }
         spectateSent = false;
         return origOnClose(tab);
@@ -620,6 +664,7 @@
     if (!passivePaintTimer) passivePaintTimer = setInterval(function () {
       if (isNewFfaSelected()) passivePaintLeaderboard();
     }, 500);
+    installFfaPlayBridge(sc);
     hooked = true;
     bindSecondaryTab(sc);
     log('ONYX-ENGINE', 'adapter wrapped SC.init/send/onMessage');
