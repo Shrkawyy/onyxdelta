@@ -686,43 +686,50 @@
   }
 
   function handleOpcode10(r) {
-    var add = r.readUInt8();
-    var i;
-    for (i = 0; i < add; i++) {
-      var id = r.readUInt16();
-      var isBot = !!r.readUInt8();
-      var nick = r.readUTF16StringLength();
-      var tag = r.readUTF16StringLength();
-      var color = r.readUInt24();
-      var reserved = !!r.readInt8();
-      var clan = r.readUTF16StringLength();
-      playerClients[id] = { clientId: id, isBot: isBot, nick: nick, tag: tag, color: color, reserved: reserved, clan: clan };
+    var start = r.offset;
+    try {
+      var add = r.readUInt8();
+      var i;
+      for (i = 0; i < add; i++) {
+        var id = r.readUInt16();
+        var isBot = !!r.readUInt8();
+        var nick = r.readUTF16StringLength();
+        var tag = r.readUTF16StringLength();
+        var red = r.readUInt8();
+        var green = r.readUInt8();
+        var blue = r.readUInt8();
+        var reserved = !!r.readUInt8();
+        var color = (red << 16) | (green << 8) | blue;
+        // Delta opcode 10 has no clan field in the add record.
+        playerClients[id] = { clientId: id, isBot: isBot, nick: nick, tag: tag, color: color, reserved: reserved };
+      }
+      var upd = r.readUInt8();
+      for (i = 0; i < upd; i++) {
+        var uid = r.readUInt16();
+        var flags = r.readUInt8();
+        var row = playerClients[uid];
+        if (flags & 1) {
+          var nn = r.readUTF16StringLength();
+          if (row) row.nick = nn;
+        }
+        if (flags & 2) {
+          var tg = r.readUTF16StringLength();
+          if (row) row.tag = tg;
+        }
+        if (flags & 4) {
+          var ur = r.readUInt8();
+          var ug = r.readUInt8();
+          var ub = r.readUInt8();
+          var res = !!r.readUInt8();
+          if (row) { row.color = (ur << 16) | (ug << 8) | ub; row.reserved = res; }
+        }
+        // Delta opcode 10 has no flags&8 clan payload.
+      }
+      var del = r.readUInt8();
+      for (i = 0; i < del; i++) delete playerClients[r.readUInt16()];
+    } catch (err) {
+      log('opcode10 skipped safely at offset=' + start + ' error=' + (err && err.message || err));
     }
-    var upd = r.readUInt8();
-    for (i = 0; i < upd; i++) {
-      var uid = r.readUInt16();
-      var flags = r.readUInt8();
-      var row = playerClients[uid];
-      if (flags & 1) {
-        var nn = r.readUTF16StringLength();
-        if (row) row.nick = nn;
-      }
-      if (flags & 2) {
-        var tg = r.readUTF16StringLength();
-        if (row) row.tag = tg;
-      }
-      if (flags & 4) {
-        var col = r.readUInt24();
-        var res = !!r.readInt8();
-        if (row) { row.color = col; row.reserved = res; }
-      }
-      if (flags & 8) {
-        var cl = r.readUTF16StringLength();
-        if (row) row.clan = cl;
-      }
-    }
-    var del = r.readUInt8();
-    for (i = 0; i < del; i++) delete playerClients[r.readUInt16()];
   }
 
   function handleOpcode11(r) {
