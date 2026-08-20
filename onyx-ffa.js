@@ -62,6 +62,7 @@
   var fpsFrames = 0;
   var fpsLast = 0;
   var fpsValue = 0;
+  var lastLeaderboardAt = 0;
   var camX = 0;
   var camY = 0;
   var camZoom = 0.18;
@@ -146,6 +147,28 @@
   function selectedServer() {
     var sel = document.getElementById('servers');
     return sel ? sel.value : '';
+  }
+
+  function ensureDeltaSelected() {
+    var sel = document.getElementById('servers');
+    if (!sel || !sel.options || !sel.options.length) return false;
+    var current = selectedOption();
+    if (current && (current.getAttribute('data-onyx-type') === FFA_TYPE || isFfaValue(sel.value))) return true;
+    var candidate = null;
+    for (var i = 0; i < sel.options.length; i++) {
+      var opt = sel.options[i];
+      var marker = [opt.getAttribute('data-onyx-type') || '', opt.getAttribute('data-onyx-host') || '', opt.getAttribute('data-onyx-id') || '', opt.textContent || ''].join(' ').toLowerCase();
+      if (marker.indexOf('eu.senpa.io:2001') !== -1 || marker.indexOf('delta-ffaeu2') !== -1 || marker.indexOf('delta ffaeu2') !== -1) {
+        candidate = opt;
+        break;
+      }
+    }
+    if (!candidate) return false;
+    if (candidate.getAttribute('data-onyx-host')) candidate.value = candidate.getAttribute('data-onyx-host');
+    sel.selectedIndex = candidate.index;
+    try { sel.dispatchEvent(new Event('change', { bubbles: true })); } catch (_) {}
+    log('CONNECT', 'auto-selected Delta FFAEU2 option host=' + sel.value);
+    return true;
   }
 
   function isUserscriptRuntime() {
@@ -723,7 +746,7 @@
         var reserved = !!r.readUInt8();
         var color = (red << 16) | (green << 8) | blue;
         // Delta opcode 10 has no clan field in the add record.
-        playerClients[id] = { clientId: id, isBot: isBot, nick: nick, tag: tag, color: color, reserved: reserved };
+        playerClients[id] = { clientId: id, isBot: isBot, nick: nick, name: nick, tag: tag, color: color, reserved: reserved };
       }
       var upd = r.readUInt8();
       for (i = 0; i < upd; i++) {
@@ -732,7 +755,7 @@
         var row = playerClients[uid];
         if (flags & 1) {
           var nn = r.readUTF16StringLength();
-          if (row) row.nick = nn;
+          if (row) { row.nick = nn; row.name = nn; }
         }
         if (flags & 2) {
           var tg = r.readUTF16StringLength();
@@ -749,6 +772,7 @@
       }
       var del = r.readUInt8();
       for (i = 0; i < del; i++) delete playerClients[r.readUInt16()];
+      refreshCellNames();
     } catch (err) {
       log('opcode10 skipped safely at offset=' + start + ' error=' + (err && err.message || err));
     }
@@ -787,6 +811,7 @@
     }
     var del = r.readUInt8();
     for (i = 0; i < del; i++) delete players[r.readUInt16()];
+    refreshCellNames();
     adoptOwnCellsFromWorld();
     if (playRequested && authCompleted && !spawned) maybeSpawn();
   }
@@ -829,7 +854,9 @@
           log('ALLOC 8 blob=' + blobLen + ' ok=' + !!ok);
         }
       }
-      cells[id] = { id: id, x: x, y: y, r: size, tx: x, ty: y, tr: size, mine: mine, color: color, kind: kind, pid: pid, skin: (players[pid] && players[pid].skin) || '' };
+      var cellRec = players[pid];
+      var cellClient = cellRec ? playerClients[cellRec.clientId] : playerClients[pid];
+      cells[id] = { id: id, x: x, y: y, r: size, tx: x, ty: y, tr: size, mine: mine, color: color, kind: kind, pid: pid, clientId: cellRec ? cellRec.clientId : pid, nick: cellClient ? (cellClient.nick || cellClient.name || '') : '', tag: cellClient ? (cellClient.tag || '') : '', skin: (cellRec && cellRec.skin) || '' };
       if (mine) claimOwnCell(id, pid);
     }
     var updCount = r.readUInt16();
@@ -1104,10 +1131,50 @@
     return theme;
   }
 
-  function cellName(cell) {
+  function resolvePlayerClient(cell) {
+    if (!cell) return null;
     var rec = players[cell.pid];
-    var pc = rec ? playerClients[rec.clientId] : playerClients[cell.pid];
-    return (pc && pc.nick) || '';
+    var candidates = [];
+    if (rec) candidates.push(rec.clientId, rec.playerId);
+    candidates.push(cell.clientId, cell.pid);
+    for (var i = 0; i < candidates.length; i++) {
+      var key = candidates[i];
+      if (key === undefined || key === null) continue;
+      var pc = playerClients[key];
+      if (pc && (pc.nick || pc.name || pc.tag)) return pc;
+    }
+    return null;
+  }
+
+  function cellName(cell) {
+    var pc = resolvePlayerClient(cell);
+    return (cell && (cell.nick || cell.name)) || (pc && (pc.nick || pc.name)) || '';
+  }
+
+  function refreshCellNames() {
+    var ids = Object.keys(cells);
+    for (var i = 0; i < ids.length; i++) {
+      var cell = cells[ids[i]];
+      if (!cell || cell.kind !== 0) continue;
+      var pc = resolvePlayerClient(cell);
+      if (pc && (pc.nick || pc.name)) cell.nick = pc.nick || pc.name;
+      if (pc && pc.tag) cell.tag = pc.tag;
+    }
+  }
+
+  function updateFfaLeaderboard() {
+    var root = document.getElementById('leaderboard-positions');
+    if (!root) return;
+    var rows = root.querySelectorAll('.lb-position');
+    if (!rows || !rows.length) return;
+    var list = Object.keys(cells).map(function (id) { return cells[id]; }).filter(function (c) { return c && c.kind === 0; });
+    list.sort(function (a, b) { return (b.r || 0) - (a.r || 0); });
+    for (var i = 0; i < rows.length; i++) {
+      var nameEl = rows[i].querySelector('[lbdata="name"]');
+      if (!nameEl) continue;
+      var cell = list[i];
+      nameEl.textContent = cell ? (cellName(cell) || 'Unnamed cell') : '';
+    }
   }
 
   function cellSkinUrl(cell) {
@@ -1250,6 +1317,10 @@
       var hud = 'FPS: ' + fpsValue + '   Ping: ' + pingMs + ' ms' + (spawned ? '   Mass: ' + massSum : '');
       if (stats) stats.textContent = hud;
       if (global.ONYXUi && global.ONYXUi.updateStats) global.ONYXUi.updateStats(hud);
+    }
+    if (now - lastLeaderboardAt >= 500) {
+      lastLeaderboardAt = now;
+      updateFfaLeaderboard();
     }
     var ids = Object.keys(cells);
     var i;
@@ -1606,6 +1677,12 @@
 
   function interceptUi() {
     restoreProfileFields();
+    ensureDeltaSelected();
+    var selectAttempts = 0;
+    var selectTimer = setInterval(function () {
+      selectAttempts++;
+      if (ensureDeltaSelected() || selectAttempts > 20) clearInterval(selectTimer);
+    }, 150);
     document.addEventListener('click', function (e) {
       var playBtn = e.target && e.target.closest && e.target.closest('#button-play');
       if (!playBtn || !isFfaSelected()) return;
