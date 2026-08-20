@@ -12,6 +12,8 @@
 
   var NEW_FFA_HOST = 'eu.senpa.io:2001';
   var NEW_FFA_IDS = { 'ffa-eu': 1, 'delta-ffaeu2': 1, 'eu.senpa.io:2001': 1 };
+  // Use deo.onyx's live SC input path for Delta Play/Spectate.
+  var USE_DEO_INPUT_FALLBACK = true;
   var TID_KEY = 'kateronyx:delta-tid';
   var SECONDARY_SESSION_KEY = 'senpaio:session:secondary';
   var AUTH_ORIGIN = 'https://api.senpa.io';
@@ -535,6 +537,10 @@
         if (!play) return;
         ensureFfaSelection();
         syncFfaType();
+        if (isNewFfaSelected() && USE_DEO_INPUT_FALLBACK) {
+          log('INPUT', 'PLAY → deo.onyx Delta fallback; guest SC input enabled');
+          return;
+        }
         if (isNewFfaSelected()) {
           e.preventDefault();
           e.stopImmediatePropagation();
@@ -588,6 +594,7 @@
     readJwt: readJwt
   };
   global.ONYXFfaAdapter = global.__ONYX_ADAPTER__;
+  global.__ONYX_DEO_INPUT_FALLBACK__ = USE_DEO_INPUT_FALLBACK;
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
   else boot();

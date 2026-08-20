@@ -28,6 +28,7 @@
   var workerReady = false;
   var socketOpen = false;
   var authCompleted = false;
+  var guestHandshakeSent = false;
   var clientReady = false;
   var worldSeen = false;
   var spawned = false;
@@ -459,7 +460,9 @@
 
   function buildFfaUrl() {
     var host = ffaHost();
-    return 'wss://' + host + '?po=' + encodeURIComponent(location.host) + '&tid=' + tid();
+    var originHost = location.host;
+    if (/^(127\.0\.0\.1|localhost)(:\d+)?$/i.test(originHost)) originHost = 'onyxdelta-5768.vercel.app';
+    return 'wss://' + host + '?po=' + encodeURIComponent(originHost) + '&tid=' + tid();
   }
 
   function hexBytes(bytes, max) {
@@ -486,6 +489,8 @@
   }
 
   function sendAuth() {
+    if (guestHandshakeSent) return;
+    guestHandshakeSent = true;
     lastPhase = 'HANDSHAKE';
     authCompleted = true;
     clientReady = true;
@@ -1541,6 +1546,7 @@
 
   function resetSession() {
     authCompleted = false;
+    guestHandshakeSent = false;
     clientReady = false;
     worldSeen = false;
     spawned = false;
@@ -1585,6 +1591,9 @@
         setPhase('CONNECTED');
         logWs('OPEN');
         log('WS_OPEN');
+        // Delta guest accepts the handshake immediately after the socket opens.
+        // Waiting for legacy opcode 8 can leave the client stuck at CONNECTED.
+        sendAuth();
       },
       onClose: handleCodecClose,
       onMessage: onServerPacket,
@@ -1704,7 +1713,7 @@
     }, 150);
     document.addEventListener('click', function (e) {
       var playBtn = e.target && e.target.closest && e.target.closest('#button-play');
-      if (!playBtn || !isFfaSelected()) return;
+      if (!playBtn || global.__ONYX_DEO_INPUT_FALLBACK__ || !isFfaSelected()) return;
       e.preventDefault();
       e.stopImmediatePropagation();
       playFromUi();
@@ -1712,7 +1721,7 @@
 
     document.addEventListener('click', function (e) {
       var spec = e.target && e.target.closest && e.target.closest('#button-spectate');
-      if (!spec || !isFfaSelected()) return;
+      if (!spec || global.__ONYX_DEO_INPUT_FALLBACK__ || !isFfaSelected()) return;
       if (playRequested && spawnSent && !spawned) return;
       e.preventDefault();
       e.stopImmediatePropagation();
