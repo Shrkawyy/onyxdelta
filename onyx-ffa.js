@@ -678,10 +678,21 @@
   function adoptOwnCellsFromWorld() {
     if (spawned) return;
     var ids = Object.keys(cells);
+    var firstKind0 = null;
     for (var i = 0; i < ids.length; i++) {
       var cell = cells[ids[i]];
       if (!cell || cell.kind !== 0) continue;
-      if (isOwnPlayerId(cell.pid)) claimOwnCell(cell.id, cell.pid);
+      if (!firstKind0) firstKind0 = cell;
+      if (isOwnPlayerId(cell.pid)) {
+        claimOwnCell(cell.id, cell.pid);
+        return;
+      }
+    }
+    // Delta can send parentClientID values that are not the serverInfo playerIds.
+    // Once identity is ready, claim the first live kind-0 cell as the guest cell.
+    if (firstKind0 && playRequested && identityReady) {
+      log('Delta guest fallback: claiming first kind-0 cell after identity map');
+      claimOwnCell(firstKind0.id, firstKind0.pid);
     }
   }
 
