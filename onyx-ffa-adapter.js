@@ -69,6 +69,25 @@
     return el.options[el.selectedIndex];
   }
 
+  function ensureFfaSelection() {
+    var el = document.getElementById('servers');
+    if (!el || !el.options || !el.options.length) return false;
+    var current = selectedOption();
+    if (current && (current.getAttribute('data-onyx-type') === 'ffa' || current.getAttribute('data-onyx-host') === NEW_FFA_HOST || NEW_FFA_IDS[current.value])) return true;
+    for (var i = 0; i < el.options.length; i++) {
+      var opt = el.options[i];
+      var marker = [opt.value || '', opt.textContent || '', opt.getAttribute('data-onyx-id') || '', opt.getAttribute('data-onyx-host') || '', opt.getAttribute('data-onyx-type') || ''].join(' ').toLowerCase();
+      if (marker.indexOf('delta-ffaeu2') !== -1 || marker.indexOf('delta ffaeu2') !== -1 || marker.indexOf(NEW_FFA_HOST) !== -1) {
+        if (opt.getAttribute('data-onyx-host')) opt.value = opt.getAttribute('data-onyx-host');
+        el.selectedIndex = i;
+        try { el.dispatchEvent(new Event('change', { bubbles: true })); } catch (_) {}
+        log('CONNECT', 'PLAY auto-selected Delta FFAEU2 host=' + el.value);
+        return true;
+      }
+    }
+    return false;
+  }
+
   function mapHost(raw) {
     var host = String(raw || '').trim();
     if (!host) {
@@ -518,6 +537,7 @@
       document.addEventListener('click', function (e) {
         var play = e.target && e.target.closest && e.target.closest('#button-play');
         if (!play) return;
+        ensureFfaSelection();
         syncFfaType();
         if (isNewFfaSelected()) {
           e.preventDefault();
