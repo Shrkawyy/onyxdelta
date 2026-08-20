@@ -176,6 +176,9 @@
   }
 
   function isFfaSelected() {
+    // The legacy UI can leave the only Delta option at selectedIndex=-1.
+    // Re-select it at the exact moment PLAY is tested, not only during boot.
+    if (!selectedOption()) ensureDeltaSelected();
     if (isUserscriptRuntime()) return true;
     var opt = selectedOption();
     if (opt && opt.getAttribute('data-onyx-type') === FFA_TYPE) return true;
