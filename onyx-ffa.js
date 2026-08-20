@@ -20,7 +20,7 @@
   var TOKEN_KEY = 'senpa_auth_token';
   var TID_KEY = '__ONYX_FFA_TID__';
   var CAPTCHA_SITE_KEY = '0x4AAAAAAACWFDYFT_opGqX8';
-  var WORKER_URL = 'ffa/onyx-ffa-codec-worker.js';
+  var WORKER_URL = null;
 
   var playing = false;
   var lastPhase = 'IDLE';
@@ -1461,62 +1461,14 @@
   function startWorker() {
     killWorker();
     resetSession();
-    snapshotGlobals('before-worker');
-    if (global.ONYXFfaCodec) {
-      startPageCodec().catch(function (err) {
-        fail('CODEC_FAILED', err && err.message ? err.message : String(err));
-      });
+    snapshotGlobals('before-page-codec');
+    if (!global.ONYXFfaCodec) {
+      fail('CODEC_FAILED', 'onyx-ffa-codec.js is not loaded');
       return;
     }
-    worker = new Worker(WORKER_URL);
-    worker.onmessage = function (ev) {
-      var msg = ev.data || {};
-      if (msg.type === 'log') {
-        log(String(msg.msg || '').replace(/^\[WASM\]\s*/, ''));
-        return;
-      }
-      if (msg.type === 'codec-ready') {
-        workerReady = true;
-        log('Codec worker ready (isolated WASM)');
-        lastPhase = 'CONNECTING';
-        log('Connecting to ' + FFA_HOST);
-        worker.postMessage({ type: 'connect', url: buildFfaUrl() });
-        return;
-      }
-      if (msg.type === 'open') {
-        socketOpen = true;
-        lastPhase = 'WS_OPEN';
-        log('WebSocket OPEN');
-        return;
-      }
-      if (msg.type === 'message') {
-        onServerPacket(msg.data);
-        return;
-      }
-      if (msg.type === 'close') {
-        var code = msg.code;
-        if (global.__ONYX_FFA_CONNECTED__ && (code === 1000 || code === 1001)) {
-          log('WebSocket closed after gameplay code=' + code);
-          return;
-        }
-        var errCode = 'WS_ERROR';
-        if (code === 1008 || code === 4001 || code === 4003) errCode = 'SERVER_REJECTED';
-        if (!global.__ONYX_FFA_CONNECTED__ && (code === 1000 || code === 1005)) errCode = 'HANDSHAKE_FAILED';
-        fail(errCode, 'close code=' + code + ' reason="' + (msg.reason || '') + '" clean=' + msg.wasClean, {
-          phase: lastPhase,
-          authCompleted: authCompleted,
-          clientReady: clientReady
-        });
-        stop('close');
-        return;
-      }
-      if (msg.type === 'error') {
-        fail(msg.code || 'WS_ERROR', msg.msg || '');
-      }
-    };
-    worker.onerror = function (err) {
-      fail('INITIALIZATION_FAILED', err && err.message ? err.message : 'codec worker error');
-    };
+    startPageCodec().catch(function (err) {
+      fail('CODEC_FAILED', err && err.message ? err.message : String(err));
+    });
   }
 
   function onMouseMove(ev) {

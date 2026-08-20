@@ -535,8 +535,8 @@
         if (hookSC() || n > 80) clearInterval(t);
       }, 100);
     }
-    log('ONYX-ENGINE', 'adapter ready PIXI/deo path — onyx-ffa.js not loaded');
-    log('RENDER', '#canvas PIXI (deo) — #gameCanvas hidden');
+    log('ONYX-ENGINE', global.ONYXFfa ? 'adapter ready — onyx-ffa.js loaded' : 'adapter ready — onyx-ffa.js unavailable');
+    log('RENDER', global.ONYXFfa ? '#gameCanvas FFA path available' : '#canvas PIXI (deo) fallback');
     log('DECODE', 'deo suffix 0x386="?password=" 0x83d="wss://" — FFA adds ?po=&tid=');
   }
 
