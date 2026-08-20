@@ -26,12 +26,6 @@
   var hooked = false;
   var spectateSent = false;
   var lastConnectHost = '';
-  var passiveClients = Object.create(null);
-  var passivePlayers = Object.create(null);
-  var passiveRows = [];
-  var passivePaintTimer = null;
-  var ffaPlayBridgeInstalled = false;
-  var primaryReconnectTimer = null;
   var origInit = null;
   var origSend = null;
   var origOnMessage = null;
@@ -109,37 +103,10 @@
     return isNewFfaHost(selectedRaw());
   }
 
-  function ffaQuery() {
-    var origin = (global.location && global.location.host) || 'onyxdelta.vercel.app';
-    return '?po=' + encodeURIComponent(origin) + '&tid=' + hex32();
-  }
-
   function wsUrl(host) {
     host = mapHost(host);
-    return 'wss://' + NEW_FFA_HOST + ffaQuery();
-  }
-
-  function installWebSocketUrlPatch() {
-    var Native = global.WebSocket;
-    if (!Native || Native.__onyxUrlPatch) return;
-    function OnyxWebSocket(url, protocols) {
-      var target = String(url || '');
-      if (/^wss:\/\/eu\.senpa\.io:2001\/?$/i.test(target)) {
-        target = 'wss://' + NEW_FFA_HOST + ffaQuery();
-        log('CONNECT', 'rewrote bare Delta WebSocket URL → ' + target.replace(/(tid=)[a-f0-9]+/i, '$1***'));
-      }
-      if (arguments.length > 1) return new Native(target, protocols);
-      return new Native(target);
-    }
-    try {
-      OnyxWebSocket.prototype = Native.prototype;
-      Object.setPrototypeOf(OnyxWebSocket, Native);
-      Object.defineProperty(OnyxWebSocket, '__onyxUrlPatch', { value: true });
-      global.WebSocket = OnyxWebSocket;
-      log('CONNECT', 'WebSocket URL patch installed for Delta SC path');
-    } catch (err) {
-      log('CONNECT', 'WebSocket URL patch skipped — ' + (err && err.message || err));
-    }
+    if (isNewFfaHost(host)) return 'wss://' + NEW_FFA_HOST;
+    return 'wss://' + NEW_FFA_HOST;
   }
 
   function readJwt(tab) {
@@ -171,127 +138,6 @@
       return new Uint8Array(buf.buffer, buf.byteOffset || 0, buf.byteLength || buf.buffer.byteLength);
     }
     return null;
-  }
-
-  function passiveU16(u8, p) { return u8[p] | (u8[p + 1] << 8); }
-
-  function passiveUtf16(u8, state, len) {
-    if (len < 0 || state.p + len * 2 > u8.length) throw new RangeError('name out of bounds');
-    var text = '';
-    for (var i = 0; i < len; i++) {
-      text += String.fromCharCode(u8[state.p] | (u8[state.p + 1] << 8));
-      state.p += 2;
-    }
-    return text;
-  }
-
-  function passiveParseClientMap(u8) {
-    if (!u8 || u8[0] !== 10 || u8.length < 2) return;
-    var s = { p: 1 };
-    try {
-      var add = u8[s.p++];
-      for (var i = 0; i < add; i++) {
-        var id = passiveU16(u8, s.p); s.p += 2;
-        s.p++;
-        var nick = passiveUtf16(u8, s, u8[s.p++]);
-        var tag = passiveUtf16(u8, s, u8[s.p++]);
-        s.p += 4;
-        passiveClients[id] = { nick: nick, name: nick, tag: tag };
-      }
-      var upd = u8[s.p++];
-      for (i = 0; i < upd; i++) {
-        var uid = passiveU16(u8, s.p); s.p += 2;
-        var flags = u8[s.p++];
-        var row = passiveClients[uid] || (passiveClients[uid] = {});
-        if (flags & 1) { row.nick = passiveUtf16(u8, s, u8[s.p++]); row.name = row.nick; }
-        if (flags & 2) row.tag = passiveUtf16(u8, s, u8[s.p++]);
-        if (flags & 4) s.p += 4;
-      }
-      var del = u8[s.p++];
-      for (i = 0; i < del; i++) { delete passiveClients[passiveU16(u8, s.p)]; s.p += 2; }
-    } catch (_) {}
-  }
-
-  function passiveParsePlayers(u8) {
-    if (!u8 || u8[0] !== 11 || u8.length < 2) return;
-    var p = 1;
-    try {
-      var add = u8[p++];
-      for (var i = 0; i < add; i++) {
-        if (p + 8 > u8.length) return;
-        var pid = passiveU16(u8, p); p += 2;
-        var cid = passiveU16(u8, p); p += 2;
-        p += 3;
-        var skinLen = u8[p++];
-        if (p + skinLen > u8.length) return;
-        p += skinLen;
-        passivePlayers[pid] = { playerId: pid, clientId: cid };
-      }
-      if (p >= u8.length) return;
-      var upd = u8[p++];
-      for (i = 0; i < upd; i++) {
-        if (p + 3 > u8.length) return;
-        var upid = passiveU16(u8, p); p += 2;
-        var flags = u8[p++];
-        if (flags & 1) p += 3;
-        if (flags & 2) { var us = u8[p++]; p += us; }
-      }
-      if (p >= u8.length) return;
-      var del = u8[p++];
-      for (i = 0; i < del; i++) { delete passivePlayers[passiveU16(u8, p)]; p += 2; }
-    } catch (_) {}
-  }
-
-  function passiveName(id) {
-    var direct = passiveClients[id];
-    if (direct && (direct.nick || direct.name)) return direct.nick || direct.name;
-    var player = passivePlayers[id];
-    if (player) {
-      var mapped = passiveClients[player.clientId];
-      if (mapped && (mapped.nick || mapped.name)) return mapped.nick || mapped.name;
-    }
-    for (var pid in passivePlayers) {
-      if (passivePlayers[pid].clientId !== id) continue;
-      var pc = passiveClients[pid];
-      if (pc && (pc.nick || pc.name)) return pc.nick || pc.name;
-    }
-    return '';
-  }
-
-  function passiveParseLeaderboard(u8) {
-    if (!u8 || u8[0] !== 21 || u8.length < 2) return;
-    var count = u8[1] & 0x7f;
-    var rows = [];
-    for (var i = 0; i < count && 2 + i * 6 + 6 <= u8.length; i++) {
-      var p = 2 + i * 6;
-      rows.push({ clientId: passiveU16(u8, p), score: (u8[p + 2] | (u8[p + 3] << 8) | (u8[p + 4] << 16) | (u8[p + 5] << 24)) >>> 0 });
-    }
-    rows.sort(function (a, b) { return b.score - a.score; });
-    passiveRows = rows;
-  }
-
-  function passivePaintLeaderboard() {
-    if (!passiveRows.length) return;
-    var root = document.getElementById('leaderboard-positions');
-    if (!root) return;
-    var rows = root.querySelectorAll('.lb-position');
-    if (!rows || !rows.length) return;
-    for (var i = 0; i < rows.length && i < passiveRows.length; i++) {
-      var nameEl = rows[i].querySelector('[lbdata="name"]');
-      if (!nameEl) continue;
-      var name = passiveName(passiveRows[i].clientId);
-      if (name && (!nameEl.textContent || /^Unnamed cell(?:\\s|$)/i.test(nameEl.textContent) || nameEl.textContent !== name)) nameEl.textContent = name;
-    }
-  }
-
-  function passiveHandlePacket(u8) {
-    if (!u8 || !u8.length) return;
-    if (u8[0] === 10) passiveParseClientMap(u8);
-    if (u8[0] === 11) passiveParsePlayers(u8);
-    if (u8[0] === 21) passiveParseLeaderboard(u8);
-    if (u8[0] === 10 || u8[0] === 11 || u8[0] === 21) {
-      try { setTimeout(passivePaintLeaderboard, 0); } catch (_) {}
-    }
   }
 
   function buildAuthPacket(token) {
@@ -453,15 +299,10 @@
     secondaryAuthOverlay = null;
   }
 
-  function primarySocketReady(sc) {
-    if (!sc || !sc.Tab1) return false;
-    return sc.connectedTab1 === true || sc.Tab1.readyState === 1;
-  }
-
   function startSecondary(sc) {
     if (secondaryStarted || secondaryPending) return;
-    if (!primarySocketReady(sc)) {
-      log('CONNECT', 'Tab pressed before Tab 1 WebSocket OPEN; keeping Secondary closed');
+    if (!sc || !sc.Tab1) {
+      log('CONNECT', 'Tab pressed before Tab 1 is ready; keeping Secondary closed');
       return;
     }
     log('AUTH', 'Delta guest mode — secondary login skipped');
@@ -528,64 +369,12 @@
     document.addEventListener('keydown', function (event) {
       if (event.key !== 'Tab' || event.ctrlKey || event.altKey || event.metaKey) return;
       if (secondaryStarted || secondaryPending) return;
-      if (!sc || !primarySocketReady(sc) || sc.Tab2) return;
+      if (!sc || !sc.Tab1 || sc.Tab2) return;
       event.preventDefault();
       event.stopImmediatePropagation();
       startSecondary(sc);
     }, true);
     log('CONNECT', 'Secondary gate bound to first Tab');
-  }
-
-  function autoStartPrimaryTab(sc) {
-    if (!sc || !isNewFfaSelected()) return;
-    if (sc.__onyxPrimaryTabPending || sc.Tab1) return;
-    var attempts = sc.__onyxPrimaryTabAttempts || 0;
-    if (attempts >= 2) return;
-    sc.__onyxPrimaryTabAttempts = attempts + 1;
-    sc.__onyxPrimaryTabPending = true;
-    setTimeout(function () {
-      if (sc.Tab1) {
-        sc.__onyxPrimaryTabPending = false;
-        return;
-      }
-      try {
-        log('CONNECT', 'auto-starting Tab 1 after FFA Play attempt=' + sc.__onyxPrimaryTabAttempts);
-        sc.init(NEW_FFA_HOST, 1);
-      } catch (err) {
-        log('CONNECT', 'auto Tab 1 failed — ' + (err && err.message || err));
-      }
-      sc.__onyxPrimaryTabPending = false;
-      setTimeout(function () {
-        if (!sc.Tab1 && isNewFfaSelected() && (sc.__onyxPrimaryTabAttempts || 0) < 2) {
-          log('CONNECT', 'Tab 1 not ready after first init — retrying once');
-          autoStartPrimaryTab(sc);
-        }
-      }, 1200);
-    }, 0);
-  }
-
-  function schedulePrimaryReconnect(sc) {
-    if (primaryReconnectTimer || !isNewFfaSelected()) return;
-    var active = global.ONYXFfa && typeof global.ONYXFfa.isPlaying === 'function' && global.ONYXFfa.isPlaying();
-    if (!active) return;
-    primaryReconnectTimer = setTimeout(function () {
-      primaryReconnectTimer = null;
-      if (isNewFfaSelected() && !primarySocketReady(sc)) {
-        log('CONNECT', 'Tab 1 closed during FFA play — reconnecting automatically');
-        autoStartPrimaryTab(sc);
-      }
-    }, 1500);
-  }
-
-  function installFfaPlayBridge(sc) {
-    if (ffaPlayBridgeInstalled || !global.ONYXFfa || typeof global.ONYXFfa.playFromUi !== 'function') return;
-    var originalPlay = global.ONYXFfa.playFromUi;
-    global.ONYXFfa.playFromUi = function () {
-      autoStartPrimaryTab(sc);
-      return originalPlay.apply(this, arguments);
-    };
-    ffaPlayBridgeInstalled = true;
-    log('CONNECT', 'FFA Play bridge installed — Tab 1 will start automatically');
   }
 
   function hookSC() {
@@ -607,9 +396,6 @@
       cellOutLog = 0;
       syncFfaType();
       tab = tab || 1;
-      if (tab === 1 && isNewFfaHost(mapped)) {
-        sc.__onyxPrimaryTabPending = false;
-      }
       if (tab === 2 && !secondaryPending && !secondaryStarted && isNewFfaHost(mapped)) {
         log('CONNECT', 'tab=2 guest start allowed for Delta');
         secondaryPending = true;
@@ -671,7 +457,6 @@
         var u8 = toU8(data);
         var result = origOnMessage(data, tab);
         if (u8 && u8.length && isNewFfaHost(lastConnectHost || selectedRaw())) {
-          passiveHandlePacket(u8);
           if (shouldLogPacket(u8, 'in')) log('PACKET-IN', describePacket(u8, 'in') + ' tab=' + (tab || 1));
           if (u8[0] === 0) {
             log('HANDSHAKE', describePacket(u8, 'in'));
@@ -693,7 +478,6 @@
     if (origOnClose) {
       sc.onClose = function (tab) {
         log('DISCONNECT', 'tab=' + (tab || 1));
-        if ((tab || 1) === 1) { sc.__onyxPrimaryTabAttempts = 0; schedulePrimaryReconnect(sc); }
         if ((tab || 1) === 2) { secondaryStarted = false; secondaryPending = false; }
         spectateSent = false;
         return origOnClose(tab);
@@ -703,15 +487,10 @@
     if (origOnError) {
       sc.onError = function (tab) {
         log('DISCONNECT', 'error tab=' + (tab || 1));
-        if ((tab || 1) === 1) schedulePrimaryReconnect(sc);
         return origOnError(tab);
       };
     }
 
-    if (!passivePaintTimer) passivePaintTimer = setInterval(function () {
-      if (isNewFfaSelected()) passivePaintLeaderboard();
-    }, 500);
-    installFfaPlayBridge(sc);
     hooked = true;
     bindSecondaryTab(sc);
     log('ONYX-ENGINE', 'adapter wrapped SC.init/send/onMessage');
@@ -764,8 +543,6 @@
   }
 
   function boot() {
-    // Keep the native WebSocket constructor for ONYXFfaCodec; wrapping it here
-    // makes the codec report HANDSHAKE_FAILED after WS_OPEN on Delta guest mode.
     installWasmLocate();
     seedExtrasServer();
     seedChatType();
