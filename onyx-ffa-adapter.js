@@ -27,6 +27,7 @@
   var spectateSent = false;
   var lastConnectHost = '';
   var passiveClients = Object.create(null);
+  var passivePlayers = Object.create(null);
   var passiveRows = [];
   var passivePaintTimer = null;
   var origInit = null;
@@ -182,6 +183,52 @@
     } catch (_) {}
   }
 
+  function passiveParsePlayers(u8) {
+    if (!u8 || u8[0] !== 11 || u8.length < 2) return;
+    var p = 1;
+    try {
+      var add = u8[p++];
+      for (var i = 0; i < add; i++) {
+        if (p + 8 > u8.length) return;
+        var pid = passiveU16(u8, p); p += 2;
+        var cid = passiveU16(u8, p); p += 2;
+        p += 3;
+        var skinLen = u8[p++];
+        if (p + skinLen > u8.length) return;
+        p += skinLen;
+        passivePlayers[pid] = { playerId: pid, clientId: cid };
+      }
+      if (p >= u8.length) return;
+      var upd = u8[p++];
+      for (i = 0; i < upd; i++) {
+        if (p + 3 > u8.length) return;
+        var upid = passiveU16(u8, p); p += 2;
+        var flags = u8[p++];
+        if (flags & 1) p += 3;
+        if (flags & 2) { var us = u8[p++]; p += us; }
+      }
+      if (p >= u8.length) return;
+      var del = u8[p++];
+      for (i = 0; i < del; i++) { delete passivePlayers[passiveU16(u8, p)]; p += 2; }
+    } catch (_) {}
+  }
+
+  function passiveName(id) {
+    var direct = passiveClients[id];
+    if (direct && (direct.nick || direct.name)) return direct.nick || direct.name;
+    var player = passivePlayers[id];
+    if (player) {
+      var mapped = passiveClients[player.clientId];
+      if (mapped && (mapped.nick || mapped.name)) return mapped.nick || mapped.name;
+    }
+    for (var pid in passivePlayers) {
+      if (passivePlayers[pid].clientId !== id) continue;
+      var pc = passiveClients[pid];
+      if (pc && (pc.nick || pc.name)) return pc.nick || pc.name;
+    }
+    return '';
+  }
+
   function passiveParseLeaderboard(u8) {
     if (!u8 || u8[0] !== 21 || u8.length < 2) return;
     var count = u8[1] & 0x7f;
@@ -203,8 +250,7 @@
     for (var i = 0; i < rows.length && i < passiveRows.length; i++) {
       var nameEl = rows[i].querySelector('[lbdata="name"]');
       if (!nameEl) continue;
-      var pc = passiveClients[passiveRows[i].clientId];
-      var name = pc && (pc.nick || pc.name);
+      var name = passiveName(passiveRows[i].clientId);
       if (name && (!nameEl.textContent || /^Unnamed cell(?:\\s|$)/i.test(nameEl.textContent) || nameEl.textContent !== name)) nameEl.textContent = name;
     }
   }
@@ -212,8 +258,9 @@
   function passiveHandlePacket(u8) {
     if (!u8 || !u8.length) return;
     if (u8[0] === 10) passiveParseClientMap(u8);
+    if (u8[0] === 11) passiveParsePlayers(u8);
     if (u8[0] === 21) passiveParseLeaderboard(u8);
-    if (u8[0] === 10 || u8[0] === 21) {
+    if (u8[0] === 10 || u8[0] === 11 || u8[0] === 21) {
       try { setTimeout(passivePaintLeaderboard, 0); } catch (_) {}
     }
   }
