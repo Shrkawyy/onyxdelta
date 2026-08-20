@@ -93,8 +93,8 @@
   function loadWasm() {
     var existing = wasmBytes();
     if (existing) return Promise.resolve(existing);
-    var url = (global.__KATERONYX_BASE_URL || '') + 'ffa/bundle.wasm';
-    return fetch(url || 'ffa/bundle.wasm').then(function (res) {
+    var url = (global.__KATERONYX_BASE_URL || '') + 'bundle.wasm';
+    return fetch(url || 'bundle.wasm').then(function (res) {
       if (!res.ok) throw new Error('bundle.wasm HTTP ' + res.status);
       return res.arrayBuffer();
     }).then(function (buf) {
