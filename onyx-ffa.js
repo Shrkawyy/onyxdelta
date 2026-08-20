@@ -156,6 +156,17 @@
     if (isUserscriptRuntime()) return true;
     var opt = selectedOption();
     if (opt && opt.getAttribute('data-onyx-type') === FFA_TYPE) return true;
+    if (opt) {
+      var marker = [
+        opt.getAttribute('data-onyx-id') || '',
+        opt.getAttribute('data-onyx-host') || '',
+        opt.getAttribute('value') || '',
+        opt.textContent || ''
+      ].join(' ').toLowerCase();
+      if (marker.indexOf('delta-ffaeu2') !== -1 ||
+          marker.indexOf('eu.senpa.io:2001') !== -1 ||
+          marker.indexOf('delta ffaeu2') !== -1) return true;
+    }
     return isFfaValue(selectedServer());
   }
 
