@@ -908,6 +908,11 @@
     if (r.offset + 1 <= r.view.byteLength) r.readUInt8();
     if (r.offset + 4 <= r.view.byteLength) r.readUInt32();
     flushWasmAlloc();
+    // Resolve names immediately when a new world cell is created. Delta may
+    // deliver opcode 20 before opcode 10/11, so the next packet must repaint
+    // the existing rows without waiting for another leaderboard cycle.
+    refreshCellNames();
+    updateFfaLeaderboard();
   }
 
   function handleOpcode21(r) {
@@ -1179,7 +1184,9 @@
       var nameEl = rows[i].querySelector('[lbdata="name"]');
       if (!nameEl) continue;
       var cell = list[i];
-      nameEl.textContent = cell ? (cellName(cell) || 'Unnamed cell') : '';
+      // A world packet can precede opcode 10/11. Keep the row blank until
+      // the Delta client map resolves it instead of exposing a fake name.
+      nameEl.textContent = cell ? (cellName(cell) || '') : '';
     }
   }
 
@@ -1313,6 +1320,9 @@
     ctx.imageSmoothingQuality = 'high';
     fpsFrames++;
     var now = Date.now();
+    // deo.onyx may create/rebuild #teamlist-alive after SPAWN_CONFIRMED.
+    // Keep the guest Active counter synchronized with the actual FFA state.
+    setAliveHud();
     if (!fpsLast) fpsLast = now;
     if (now - fpsLast >= 500) {
       fpsValue = Math.round(fpsFrames * 1000 / (now - fpsLast));
