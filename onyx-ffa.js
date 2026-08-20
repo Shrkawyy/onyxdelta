@@ -877,9 +877,7 @@
         playerIds = [];
         for (var t = 0; t < nTabs; t++) playerIds.push(r.readUInt16());
         if (playerIds.length > 1) {
-          fail('SERVER_REJECTED', 'Multiple tabs / dual mode is not handled by this FFA module');
-          stop('dual');
-          return;
+          log('Delta dual mode accepted; using playerIds=' + playerIds.join(',') + ' with active Tab 1');
         }
         activeTab = 0;
         authCompleted = true;

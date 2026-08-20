@@ -514,7 +514,16 @@
         var play = e.target && e.target.closest && e.target.closest('#button-play');
         if (!play) return;
         syncFfaType();
-        log('INPUT', 'PLAY → deo.onyx #button-play (not ONYXFfa)');
+        if (isNewFfaSelected()) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          log('INPUT', 'PLAY → ONYXFfa Delta path; deo.onyx blocked');
+          if (global.ONYXFfa && typeof global.ONYXFfa.playFromUi === 'function') {
+            global.ONYXFfa.playFromUi();
+          }
+          return;
+        }
+        log('INPUT', 'PLAY → deo.onyx #button-play (legacy path)');
       }, true);
     }
   }
