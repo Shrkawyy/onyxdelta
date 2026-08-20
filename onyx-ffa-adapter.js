@@ -433,8 +433,19 @@
       var u8 = toU8(buf);
       if (u8 && u8.length && isNewFfaHost(lastConnectHost || selectedRaw())) {
         if (u8[0] === 0x0d) {
-          log('AUTH', 'opcode=13 JWT packet suppressed — Delta guest mode');
-          return;
+          var authText = '';
+          try {
+            var authLen = u8.length >= 3 ? (u8[1] | (u8[2] << 8)) : 0;
+            for (var ai = 0; ai < authLen && 3 + ai * 2 + 1 < u8.length; ai++) {
+              authText += String.fromCharCode(u8[3 + ai * 2] | (u8[4 + ai * 2] << 8));
+            }
+          } catch (_) {}
+          if (authText === 'null') {
+            log('AUTH', 'opcode=13 guest null handshake allowed');
+          } else {
+            log('AUTH', 'opcode=13 JWT packet suppressed — guest mode');
+            return;
+          }
         }
         if (shouldLogPacket(u8, 'out')) log('PACKET-OUT', describePacket(u8, 'out') + ' tab=' + (tab || 1));
       }
@@ -503,7 +514,16 @@
         var play = e.target && e.target.closest && e.target.closest('#button-play');
         if (!play) return;
         syncFfaType();
-        log('INPUT', 'PLAY → deo.onyx #button-play (not ONYXFfa)');
+        if (isNewFfaSelected()) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          log('INPUT', 'PLAY → ONYXFfa Delta path; deo.onyx blocked');
+          if (global.ONYXFfa && typeof global.ONYXFfa.playFromUi === 'function') {
+            global.ONYXFfa.playFromUi();
+          }
+          return;
+        }
+        log('INPUT', 'PLAY → deo.onyx #button-play (legacy path)');
       }, true);
     }
   }

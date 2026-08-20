@@ -156,6 +156,17 @@
     if (isUserscriptRuntime()) return true;
     var opt = selectedOption();
     if (opt && opt.getAttribute('data-onyx-type') === FFA_TYPE) return true;
+    if (opt) {
+      var marker = [
+        opt.getAttribute('data-onyx-id') || '',
+        opt.getAttribute('data-onyx-host') || '',
+        opt.getAttribute('value') || '',
+        opt.textContent || ''
+      ].join(' ').toLowerCase();
+      if (marker.indexOf('delta-ffaeu2') !== -1 ||
+          marker.indexOf('eu.senpa.io:2001') !== -1 ||
+          marker.indexOf('delta ffaeu2') !== -1) return true;
+    }
     return isFfaValue(selectedServer());
   }
 
@@ -453,9 +464,15 @@
     authCompleted = true;
     clientReady = true;
     identityReady = true;
+    var guest = 'null';
+    var w = new Writer(3 + guest.length * 2);
+    w.writeUInt8(13);
+    w.writeUInt16(guest.length);
+    w.writeUTF16String(guest);
     logAuth('GUEST');
-    log('Delta FFAEU2 guest mode — JWT/login skipped');
-    if (playRequested) maybeSpawn();
+    log('Delta FFAEU2 guest handshake — opcode=13 payload=null (no JWT)');
+    sendPacket(w);
+    // Wait for server opcode=0/serverInfo before sending spawn.
   }
 
   function sendPlayerInfo() {
@@ -642,6 +659,13 @@
 
   function isOwnPlayerId(pid) {
     if (!pid && pid !== 0) return false;
+    // Delta guest may intentionally use zero IDs and omit playerIds.
+    // Claim the first kind-0 cell after our spawn when no identity mapping exists.
+    var noGuestIdentity = clientId === 0 && (playerIds.length === 0 || (playerIds.length === 1 && playerIds[0] === 0));
+    if (playRequested && !spawned && ownCells.length === 0 && noGuestIdentity) {
+      log('Guest fallback: claiming first kind-0 cell without identity mapping pid=' + pid);
+      return true;
+    }
     if (playerIds.indexOf(pid) !== -1) return true;
     if (tabPlayerId() && pid === tabPlayerId()) return true;
     if (clientId && pid === clientId) return true;
@@ -665,51 +689,69 @@
   function adoptOwnCellsFromWorld() {
     if (spawned) return;
     var ids = Object.keys(cells);
+    var firstKind0 = null;
     for (var i = 0; i < ids.length; i++) {
       var cell = cells[ids[i]];
       if (!cell || cell.kind !== 0) continue;
-      if (isOwnPlayerId(cell.pid)) claimOwnCell(cell.id, cell.pid);
+      if (!firstKind0) firstKind0 = cell;
+      if (isOwnPlayerId(cell.pid)) {
+        claimOwnCell(cell.id, cell.pid);
+        return;
+      }
+    }
+    // Delta can send parentClientID values that are not the serverInfo playerIds.
+    // Once identity is ready, claim the first live kind-0 cell as the guest cell.
+    if (firstKind0 && playRequested && identityReady) {
+      log('Delta guest fallback: claiming first kind-0 cell after identity map');
+      claimOwnCell(firstKind0.id, firstKind0.pid);
     }
   }
 
   function handleOpcode10(r) {
-    var add = r.readUInt8();
-    var i;
-    for (i = 0; i < add; i++) {
-      var id = r.readUInt16();
-      var isBot = !!r.readUInt8();
-      var nick = r.readUTF16StringLength();
-      var tag = r.readUTF16StringLength();
-      var color = r.readUInt24();
-      var reserved = !!r.readInt8();
-      var clan = r.readUTF16StringLength();
-      playerClients[id] = { clientId: id, isBot: isBot, nick: nick, tag: tag, color: color, reserved: reserved, clan: clan };
+    var start = r.offset;
+    try {
+      var add = r.readUInt8();
+      var i;
+      for (i = 0; i < add; i++) {
+        var id = r.readUInt16();
+        var isBot = !!r.readUInt8();
+        var nick = r.readUTF16StringLength();
+        var tag = r.readUTF16StringLength();
+        var red = r.readUInt8();
+        var green = r.readUInt8();
+        var blue = r.readUInt8();
+        var reserved = !!r.readUInt8();
+        var color = (red << 16) | (green << 8) | blue;
+        // Delta opcode 10 has no clan field in the add record.
+        playerClients[id] = { clientId: id, isBot: isBot, nick: nick, tag: tag, color: color, reserved: reserved };
+      }
+      var upd = r.readUInt8();
+      for (i = 0; i < upd; i++) {
+        var uid = r.readUInt16();
+        var flags = r.readUInt8();
+        var row = playerClients[uid];
+        if (flags & 1) {
+          var nn = r.readUTF16StringLength();
+          if (row) row.nick = nn;
+        }
+        if (flags & 2) {
+          var tg = r.readUTF16StringLength();
+          if (row) row.tag = tg;
+        }
+        if (flags & 4) {
+          var ur = r.readUInt8();
+          var ug = r.readUInt8();
+          var ub = r.readUInt8();
+          var res = !!r.readUInt8();
+          if (row) { row.color = (ur << 16) | (ug << 8) | ub; row.reserved = res; }
+        }
+        // Delta opcode 10 has no flags&8 clan payload.
+      }
+      var del = r.readUInt8();
+      for (i = 0; i < del; i++) delete playerClients[r.readUInt16()];
+    } catch (err) {
+      log('opcode10 skipped safely at offset=' + start + ' error=' + (err && err.message || err));
     }
-    var upd = r.readUInt8();
-    for (i = 0; i < upd; i++) {
-      var uid = r.readUInt16();
-      var flags = r.readUInt8();
-      var row = playerClients[uid];
-      if (flags & 1) {
-        var nn = r.readUTF16StringLength();
-        if (row) row.nick = nn;
-      }
-      if (flags & 2) {
-        var tg = r.readUTF16StringLength();
-        if (row) row.tag = tg;
-      }
-      if (flags & 4) {
-        var col = r.readUInt24();
-        var res = !!r.readInt8();
-        if (row) { row.color = col; row.reserved = res; }
-      }
-      if (flags & 8) {
-        var cl = r.readUTF16StringLength();
-        if (row) row.clan = cl;
-      }
-    }
-    var del = r.readUInt8();
-    for (i = 0; i < del; i++) delete playerClients[r.readUInt16()];
   }
 
   function handleOpcode11(r) {
@@ -864,9 +906,7 @@
         playerIds = [];
         for (var t = 0; t < nTabs; t++) playerIds.push(r.readUInt16());
         if (playerIds.length > 1) {
-          fail('SERVER_REJECTED', 'Multiple tabs / dual mode is not handled by this FFA module');
-          stop('dual');
-          return;
+          log('Delta dual mode accepted; using playerIds=' + playerIds.join(',') + ' with active Tab 1');
         }
         activeTab = 0;
         authCompleted = true;
@@ -928,7 +968,7 @@
         if (!worldSeen) {
           worldSeen = true;
           logWorld('READY');
-          log('World state received');
+          log('World state received opcode=20');
           log('WORLD_READY');
           setPhase('WORLD_READY');
           if (playRequested && !wantSpectate && !spawned) maybeSpawn();
@@ -939,6 +979,10 @@
         handleOpcode21(r);
         break;
       case 22:
+        // Delta may emit split/control packets with a different payload shape.
+        // Do not feed them into the opcode-20 cell parser.
+        log('RX opcode=22 ignored safely (control/split payload)');
+        break;
       case 15:
       case 41:
       case 42:
