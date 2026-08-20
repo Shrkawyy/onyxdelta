@@ -642,6 +642,13 @@
 
   function isOwnPlayerId(pid) {
     if (!pid && pid !== 0) return false;
+    // Delta guest may intentionally use zero IDs and omit playerIds.
+    // Claim the first kind-0 cell after our spawn when no identity mapping exists.
+    var noGuestIdentity = clientId === 0 && (playerIds.length === 0 || (playerIds.length === 1 && playerIds[0] === 0));
+    if (playRequested && !spawned && ownCells.length === 0 && noGuestIdentity) {
+      log('Guest fallback: claiming first kind-0 cell without identity mapping pid=' + pid);
+      return true;
+    }
     if (playerIds.indexOf(pid) !== -1) return true;
     if (tabPlayerId() && pid === tabPlayerId()) return true;
     if (clientId && pid === clientId) return true;
@@ -925,11 +932,10 @@
         if (lastPhase === 'INIT' || lastPhase === 'HANDSHAKE') log('Player initialized');
         break;
       case 20:
-      case 22:
         if (!worldSeen) {
           worldSeen = true;
           logWorld('READY');
-          log('World state received opcode=' + op);
+          log('World state received opcode=20');
           log('WORLD_READY');
           setPhase('WORLD_READY');
           if (playRequested && !wantSpectate && !spawned) maybeSpawn();
@@ -938,6 +944,11 @@
         break;
       case 21:
         handleOpcode21(r);
+        break;
+      case 22:
+        // Delta may emit split/control packets with a different payload shape.
+        // Do not feed them into the opcode-20 cell parser.
+        log('RX opcode=22 ignored safely (control/split payload)');
         break;
       case 15:
       case 41:
