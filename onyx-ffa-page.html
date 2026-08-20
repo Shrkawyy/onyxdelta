@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>KaterOnyx FFA</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #07090d; color: #e8eef6; font: 14px/1.4 Segoe UI, system-ui, sans-serif; overflow: hidden; }
+    #gameCanvas { position: absolute; inset: 0; width: 100%; height: 100%; display: none; background: #07090d; }
+    #menu-overlay { position: absolute; inset: 0; display: grid; place-items: center; background: radial-gradient(circle at 50% 0, #132436 0, transparent 46%), #07090d; z-index: 4; }
+    .card { width: min(420px, 92vw); padding: 28px 24px; border: 1px solid #2a3645; border-radius: 16px; background: linear-gradient(145deg, rgba(20,30,43,.97), rgba(10,15,23,.97)); box-shadow: 0 24px 70px #0008; }
+    h1 { margin: 0 0 4px; font-size: 28px; letter-spacing: -.03em; }
+    h1 span { color: #49dcff; }
+    .sub { margin: 0 0 18px; color: #91a5ba; font-size: 12px; }
+    label { display: block; margin: 10px 0 4px; color: #9aa6b8; font-size: 11px; letter-spacing: .06em; }
+    input { width: 100%; box-sizing: border-box; padding: 10px 12px; border: 1px solid #2a3344; border-radius: 8px; background: #0b0e14; color: #e8ecf3; }
+    .row { display: flex; gap: 10px; margin-top: 18px; }
+    button { flex: 1; border: 0; border-radius: 8px; padding: 12px 14px; font: 700 13px/1 Segoe UI, system-ui, sans-serif; cursor: pointer; }
+    #button-play { background: linear-gradient(135deg, #49dcff, #2389ff); color: #00131b; }
+    #button-login { background: #5865F2; color: #fff; }
+    .hint { margin-top: 14px; color: #71869c; font-size: 11px; }
+  </style>
+</head>
+<body>
+  <canvas id="gameCanvas"></canvas>
+  <div id="menu-overlay">
+    <div class="card">
+      <h1>Kater<span>Onyx</span></h1>
+      <p class="sub">Delta FFAEU2 · eu.mi.com:2001</p>
+      <label for="nick">PLAYER NAME</label>
+      <input id="nick" maxlength="32" placeholder="Player name" value="player" autocomplete="nickname">
+      <label for="tag">TAG</label>
+      <input id="tag" maxlength="5" placeholder="TAG">
+      <div class="row">
+        <button type="button" id="button-play">PLAY</button>
+        <button type="button" id="button-login">LOGIN</button>
+      </div>
+      <p class="hint">This page connects to Delta FFAEU2. Jaxx/OG is not loaded.</p>
+    </div>
+  </div>
+</body>
+</html>

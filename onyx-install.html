@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Install KaterOnyx FFA</title>
+  <style>
+    :root{color-scheme:dark;--bg:#070a0f;--line:#26364a;--text:#e7f0fa;--muted:#91a5ba;--cyan:#49dcff}
+    *{box-sizing:border-box}html,body{min-height:100%;margin:0}body{display:grid;place-items:center;padding:28px;background:radial-gradient(circle at 50% 0,#132436 0,transparent 42%),var(--bg);color:var(--text);font:16px/1.55 system-ui,sans-serif}
+    main{width:min(720px,100%);padding:38px;border:1px solid var(--line);border-radius:20px;background:#101722}
+    h1{margin:0;font-size:clamp(34px,7vw,56px)}h1 span{color:var(--cyan)}
+    .tag{color:var(--muted)}
+    .install{display:inline-block;margin-top:8px;padding:13px 22px;border-radius:10px;background:linear-gradient(135deg,#49dcff,#2389ff);color:#00131b;font-weight:800;text-decoration:none}
+    ol{padding-left:1.4rem}li{margin:.65rem 0}
+    code{padding:.15rem .4rem;border:1px solid #29394e;border-radius:5px;background:#0a1018;color:#7de8ff}
+    .note{margin-top:1.5rem;padding:14px 16px;border-left:3px solid #ffbe55;background:#17150f;color:#d9c8a8}
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Kater<span>Onyx</span></h1>
+    <p class="tag">FFA client, loaded on Senpa's official web origin — same host logic as JaxxV6, without the Jaxx app.</p>
+    <a class="install" href="./kateronyx.user.js">Install Tampermonkey script</a>
+    <ol>
+      <li>Install Tampermonkey.</li>
+      <li>Serve this folder: <code>npx --yes serve -p 4173</code></li>
+      <li>Click install above and confirm the script.</li>
+      <li>Reinstall/update the userscript if it was already installed (version 1.9.9).</li>
+      <li>Open <a href="https://senpa.io/web/">https://senpa.io/web/</a>.</li>
+    </ol>
+    <div class="note">
+      Do not open <code>onyx-ffa-page.html</code> or <code>ffa/client.html</code> as the game host.
+      The userscript must run on <code>senpa.io</code> so the FFA server sees Senpa's official Origin.
+      After updating, disable JaxxV6 / other Senpa scripts, then hard-refresh <code>https://senpa.io/web/</code>.
+      Success looks like the ONYX menu, PIXI on <code>#canvas</code>, console <code>[ONYX-ENGINE]</code> / <code>THEME_INLINED = true</code>, and PLAY going through deo.onyx (not ONYXFfa).
+      If the script cannot fetch files, run this in the senpa.io console:
+      <br><code>localStorage.setItem("kateronyx:base-url","http://127.0.0.1:4173/")</code>
+    </div>
+  </main>
+</body>
+</html>
