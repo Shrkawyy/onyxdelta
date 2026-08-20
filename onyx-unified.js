@@ -33,9 +33,9 @@
     // SERVERI I LOJËS — Delta FFAEU2 vetëm
     relayUrl: '',
     wsProtocol: '',
-    defaultServer: 'eu.mi.com:2001',
+    defaultServer: 'eu.senpa.io:2001',
     servers: [
-      { id: 'delta-ffaeu2', label: 'Delta FFAEU2 — EU', value: 'eu.mi.com:2001', type: 'ffa', host: 'eu.mi.com:2001', wsUrl: 'wss://eu.mi.com:2001', protocol: 'delta-ffa' },
+      { id: 'delta-ffaeu2', label: 'Delta FFAEU2 — EU', value: 'eu.senpa.io:2001', type: 'ffa', host: 'eu.senpa.io:2001', wsUrl: 'wss://eu.senpa.io:2001', protocol: 'delta-ffa' },
     ],
 
     // Chat (SENPA chat.js)
@@ -329,7 +329,7 @@
     /** Hap N lidhje me pseudonimet/skinet e dhëna (EON Player1/2, Skin1/2) */
     connect(server, nicks, skins) {
       this.disconnect();
-      const target = server || CONFIG.defaultServer;   // Delta FFAEU2: eu.mi.com:2001
+      const target = server || CONFIG.defaultServer;   // Delta FFAEU2: eu.senpa.io:2001
       const relay = CONFIG.relayUrl;                    // wss://chatonyx.onrender.com/chat
       const n = CONFIG.multibox.connections;
       // ruaj edhe te window.__connNicks për pajtueshmëri me modelin ONYX
