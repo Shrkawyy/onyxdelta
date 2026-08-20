@@ -764,7 +764,8 @@
   }
 
   function boot() {
-    installWebSocketUrlPatch();
+    // Keep the native WebSocket constructor for ONYXFfaCodec; wrapping it here
+    // makes the codec report HANDSHAKE_FAILED after WS_OPEN on Delta guest mode.
     installWasmLocate();
     seedExtrasServer();
     seedChatType();
