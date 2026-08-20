@@ -62,6 +62,8 @@
   var fpsFrames = 0;
   var fpsLast = 0;
   var fpsValue = 0;
+  var ffaLeaderboardRows = [];
+  var lastLeaderboardAt = 0;
   var camX = 0;
   var camY = 0;
   var camZoom = 0.18;
@@ -729,6 +731,62 @@
     }
   }
 
+  function resolvePlayerClient(cell) {
+    if (!cell) return null;
+    var rec = players[cell.pid];
+    var candidates = [];
+    if (rec) candidates.push(rec.clientId, rec.playerId);
+    candidates.push(cell.clientId, cell.pid);
+    for (var i = 0; i < candidates.length; i++) {
+      var key = candidates[i];
+      if (key === undefined || key === null) continue;
+      var pc = playerClients[key];
+      if (pc && (pc.nick || pc.name || pc.tag)) return pc;
+    }
+    return null;
+  }
+
+  function cellName(cell) {
+    var pc = resolvePlayerClient(cell);
+    return (cell && (cell.nick || cell.name)) || (pc && (pc.nick || pc.name)) || '';
+  }
+
+  function refreshCellNames() {
+    var ids = Object.keys(cells);
+    for (var i = 0; i < ids.length; i++) {
+      var cell = cells[ids[i]];
+      if (!cell || cell.kind !== 0) continue;
+      var pc = resolvePlayerClient(cell);
+      if (pc && (pc.nick || pc.name)) cell.nick = pc.nick || pc.name;
+      if (pc && pc.tag) cell.tag = pc.tag;
+    }
+  }
+
+  function updateFfaLeaderboard() {
+    var root = document.getElementById('leaderboard-positions');
+    if (!root) return;
+    var rows = root.querySelectorAll('.lb-position');
+    if (!rows || !rows.length) return;
+    var list;
+    if (ffaLeaderboardRows.length) {
+      list = ffaLeaderboardRows.map(function (row) {
+        var pc = playerClients[row.clientId];
+        return { name: (pc && (pc.nick || pc.name)) || ('#' + row.clientId), score: row.score };
+      });
+    } else {
+      list = Object.keys(cells).map(function (id) { return cells[id]; }).filter(function (c) {
+        return c && c.kind === 0;
+      });
+      list.sort(function (a, b) { return (b.r || 0) - (a.r || 0); });
+    }
+    for (var i = 0; i < rows.length; i++) {
+      var nameEl = rows[i].querySelector('[lbdata="name"]');
+      if (!nameEl) continue;
+      var row = list[i];
+      nameEl.textContent = row ? (row.name || cellName(row) || '') : '';
+    }
+  }
+
   function handleOpcode10(r) {
     var start = r.offset;
     try {
@@ -745,7 +803,7 @@
         var reserved = !!r.readUInt8();
         var color = (red << 16) | (green << 8) | blue;
         // Delta opcode 10 has no clan field in the add record.
-        playerClients[id] = { clientId: id, isBot: isBot, nick: nick, tag: tag, color: color, reserved: reserved };
+        playerClients[id] = { clientId: id, isBot: isBot, nick: nick, name: nick, tag: tag, color: color, reserved: reserved };
       }
       var upd = r.readUInt8();
       for (i = 0; i < upd; i++) {
@@ -754,7 +812,7 @@
         var row = playerClients[uid];
         if (flags & 1) {
           var nn = r.readUTF16StringLength();
-          if (row) row.nick = nn;
+          if (row) { row.nick = nn; row.name = nn; }
         }
         if (flags & 2) {
           var tg = r.readUTF16StringLength();
@@ -771,6 +829,8 @@
       }
       var del = r.readUInt8();
       for (i = 0; i < del; i++) delete playerClients[r.readUInt16()];
+      refreshCellNames();
+      updateFfaLeaderboard();
     } catch (err) {
       log('opcode10 skipped safely at offset=' + start + ' error=' + (err && err.message || err));
     }
@@ -809,6 +869,8 @@
     }
     var del = r.readUInt8();
     for (i = 0; i < del; i++) delete players[r.readUInt16()];
+    refreshCellNames();
+    updateFfaLeaderboard();
     adoptOwnCellsFromWorld();
     if (playRequested && authCompleted && !spawned) maybeSpawn();
   }
@@ -851,7 +913,9 @@
           log('ALLOC 8 blob=' + blobLen + ' ok=' + !!ok);
         }
       }
-      cells[id] = { id: id, x: x, y: y, r: size, tx: x, ty: y, tr: size, mine: mine, color: color, kind: kind, pid: pid, skin: (players[pid] && players[pid].skin) || '' };
+      var playerRec = players[pid];
+      var playerClient = playerRec ? playerClients[playerRec.clientId] : playerClients[pid];
+      cells[id] = { id: id, x: x, y: y, r: size, tx: x, ty: y, tr: size, mine: mine, color: color, kind: kind, pid: pid, clientId: playerRec ? playerRec.clientId : pid, nick: playerClient ? (playerClient.nick || playerClient.name || '') : '', tag: playerClient ? (playerClient.tag || '') : '', skin: (playerRec && playerRec.skin) || '' };
       if (mine) claimOwnCell(id, pid);
     }
     var updCount = r.readUInt16();
@@ -898,18 +962,27 @@
     if (r.offset + 1 <= r.view.byteLength) r.readUInt8();
     if (r.offset + 4 <= r.view.byteLength) r.readUInt32();
     flushWasmAlloc();
+    refreshCellNames();
+    updateFfaLeaderboard();
   }
 
   function handleOpcode21(r) {
-    var rows = [];
-    for (var n = r.readInt8(); n--;) {
+    var parsed = [];
+    var count = r.readInt8();
+    if (count < 0) count = 0;
+    for (var n = 0; n < count && r.offset + 6 <= r.view.byteLength; n++) {
       var cid = r.readUInt16();
       var score = r.readUInt32();
-      var pc = playerClients[cid];
-      rows.push({ name: (pc && pc.nick) || ('#' + cid), score: score });
+      parsed.push({ clientId: cid, score: score });
     }
-    rows.sort(function (a, b) { return b.score - a.score; });
+    parsed.sort(function (a, b) { return b.score - a.score; });
+    ffaLeaderboardRows = parsed;
+    var rows = parsed.map(function (row) {
+      var pc = playerClients[row.clientId];
+      return { name: (pc && (pc.nick || pc.name)) || ('#' + row.clientId), score: row.score };
+    });
     if (global.ONYXUi && global.ONYXUi.updateLeaderboard) global.ONYXUi.updateLeaderboard(rows);
+    updateFfaLeaderboard();
   }
 
   function onServerPacket(buf) {
@@ -1262,6 +1335,11 @@
     ctx.imageSmoothingQuality = 'high';
     fpsFrames++;
     var now = Date.now();
+    if (now - lastLeaderboardAt >= 500) {
+      lastLeaderboardAt = now;
+      refreshCellNames();
+      updateFfaLeaderboard();
+    }
     if (!fpsLast) fpsLast = now;
     if (now - fpsLast >= 500) {
       fpsValue = Math.round(fpsFrames * 1000 / (now - fpsLast));
@@ -1482,6 +1560,7 @@
     cells = Object.create(null);
     players = Object.create(null);
     playerClients = Object.create(null);
+    ffaLeaderboardRows = [];
     spawnSent = false;
     spawnAttempts = 0;
     spawnPidLogs = 0;
