@@ -925,10 +925,11 @@
         if (lastPhase === 'INIT' || lastPhase === 'HANDSHAKE') log('Player initialized');
         break;
       case 20:
+      case 22:
         if (!worldSeen) {
           worldSeen = true;
           logWorld('READY');
-          log('World state received');
+          log('World state received opcode=' + op);
           log('WORLD_READY');
           setPhase('WORLD_READY');
           if (playRequested && !wantSpectate && !spawned) maybeSpawn();
@@ -938,7 +939,6 @@
       case 21:
         handleOpcode21(r);
         break;
-      case 22:
       case 15:
       case 41:
       case 42:

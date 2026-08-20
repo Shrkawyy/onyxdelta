@@ -174,7 +174,7 @@
       14: 'captchaToken',
       20: dir === 'in' ? 'worldUpdate' : 'mouse/spectate',
       21: 'leaderboard',
-      22: 'split',
+      22: dir === 'in' ? 'worldUpdateDelta' : 'split',
       23: dir === 'in' ? 'spectateCamera' : 'feed',
       30: 'ping',
       31: 'fullSync',
