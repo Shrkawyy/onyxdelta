@@ -495,6 +495,9 @@
     logAuth('GUEST');
     log('Delta FFAEU2 guest handshake — opcode=13 payload=null (no JWT)');
     sendPacket(w);
+    // Delta can accept the profile metadata before serverInfo; sending it here
+    // removes the extra wait before opcode 10/11 names arrive.
+    try { sendPlayerInfo(); } catch (_) {}
     // Wait for server opcode=0/serverInfo before sending spawn.
   }
 
@@ -773,6 +776,7 @@
       var del = r.readUInt8();
       for (i = 0; i < del; i++) delete playerClients[r.readUInt16()];
       refreshCellNames();
+      updateFfaLeaderboard();
     } catch (err) {
       log('opcode10 skipped safely at offset=' + start + ' error=' + (err && err.message || err));
     }
@@ -812,6 +816,7 @@
     var del = r.readUInt8();
     for (i = 0; i < del; i++) delete players[r.readUInt16()];
     refreshCellNames();
+    updateFfaLeaderboard();
     adoptOwnCellsFromWorld();
     if (playRequested && authCompleted && !spawned) maybeSpawn();
   }
@@ -1159,6 +1164,7 @@
       var pc = resolvePlayerClient(cell);
       if (pc && (pc.nick || pc.name)) cell.nick = pc.nick || pc.name;
       if (pc && pc.tag) cell.tag = pc.tag;
+      if (cell.nick && cell.kind === 0) cell.__nameReadyAt = Date.now();
     }
   }
 
